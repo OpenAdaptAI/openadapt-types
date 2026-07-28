@@ -322,6 +322,13 @@ class HumanDecisionTaskV1(_StrictContract):
     def _validate_envelope(self) -> "HumanDecisionTaskV1":
         if len(set(self.allowed_actions)) != len(self.allowed_actions):
             raise ValueError("allowed_actions must be unique")
+        if (
+            HumanDecisionAction.RECONCILE in self.allowed_actions
+            and self.delivery_state is HumanDecisionDeliveryState.NOT_DELIVERED
+        ):
+            raise ValueError(
+                "reconcile requires a delivered or delivery-uncertain action"
+            )
         created_at = _parse_timestamp(self.created_at, "created_at")
         expires_at = _parse_timestamp(self.expires_at, "expires_at")
         if expires_at <= created_at:
@@ -518,6 +525,9 @@ class HumanDecisionReceiptV1(_StrictContract):
     The digests are one-way commitments, not content: they let a consumer bind
     this receipt to the exact capability, request, decision record, and
     transition receipt it came from without ever receiving those payloads.
+    A completed receipt requires ``report_success=true`` and a transition
+    receipt digest. A producer cannot use a success-shaped state without the
+    corresponding transition commitment.
 
     ``signature`` is optional because a runtime that returns a receipt over an
     authenticated loopback connection is already inside its own trust boundary
@@ -555,13 +565,15 @@ class HumanDecisionReceiptV1(_StrictContract):
                 f"reason_code {self.reason_code.value!r} is not a cause of state "
                 f"{self.state.value!r}"
             )
-        if (
-            self.report_success
-            and self.state not in HUMAN_DECISION_RECEIPT_SUCCESS_STATES
-        ):
+        is_success = self.state in HUMAN_DECISION_RECEIPT_SUCCESS_STATES
+        if self.report_success and not is_success:
             raise ValueError(
                 f"report_success cannot be true for state {self.state.value!r}"
             )
+        if is_success and self.report_success is not True:
+            raise ValueError("a completed receipt requires report_success=true")
+        if is_success and self.transition_receipt_digest is None:
+            raise ValueError("a completed receipt requires a transition receipt digest")
         completed_action = {
             HumanDecisionReceiptReason.VERIFIED_AND_RESUMED: (
                 HumanDecisionAction.VERIFY_AND_RESUME
@@ -593,7 +605,10 @@ class HumanDecisionReceiptV1(_StrictContract):
     def succeeded(self) -> bool:
         """Whether this receipt reports a successful workflow continuation."""
 
-        return self.state in HUMAN_DECISION_RECEIPT_SUCCESS_STATES
+        return (
+            self.state in HUMAN_DECISION_RECEIPT_SUCCESS_STATES
+            and self.report_success is True
+        )
 
     def unsigned_payload(self) -> dict[str, Any]:
         """Return the deterministic language-agnostic signed payload."""
