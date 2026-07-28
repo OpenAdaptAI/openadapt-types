@@ -517,7 +517,9 @@ def test_receipt_state_and_reason_code_cannot_be_paired_arbitrarily() -> None:
                 **_receipt_fields(),
                 "state": state,
                 "reason_code": reason,
-                "report_success": None,
+                "report_success": (
+                    True if state is HumanDecisionReceiptState.COMPLETED else None
+                ),
                 "action": _action_for_receipt_reason(reason),
             }
             if reason in reasons:
@@ -633,6 +635,8 @@ def test_receipt_canonicalization_matches_the_documented_rules() -> None:
             key=b"k" * 32,
             fields={
                 **_receipt_fields(),
+                "state": HumanDecisionReceiptState.DELIVERY_UNCERTAIN,
+                "reason_code": HumanDecisionReceiptReason.DELIVERY_UNCERTAIN,
                 "transition_receipt_digest": None,
                 "report_success": None,
             },
@@ -742,10 +746,31 @@ def test_a_task_can_advertise_the_complete_action_vocabulary() -> None:
     the most choice.
     """
     fields = _task_fields()
+    fields["delivery_state"] = HumanDecisionDeliveryState.UNKNOWN
     fields["allowed_actions"] = tuple(HumanDecisionAction)
     task = sign_human_decision_task_hmac(key=b"k" * 32, fields=fields)
     assert len(task.allowed_actions) == len(HumanDecisionAction) == 6
     assert task.verify_hmac(b"k" * 32)
+
+
+def test_reconcile_cannot_be_offered_when_no_action_was_delivered() -> None:
+    fields = _task_fields()
+    fields["allowed_actions"] = (HumanDecisionAction.RECONCILE,)
+    with pytest.raises(
+        ValidationError,
+        match="reconcile requires a delivered or delivery-uncertain action",
+    ):
+        sign_human_decision_task_hmac(key=b"k" * 32, fields=fields)
+
+    for delivery_state in (
+        HumanDecisionDeliveryState.DELIVERED,
+        HumanDecisionDeliveryState.UNKNOWN,
+    ):
+        task = sign_human_decision_task_hmac(
+            key=b"k" * 32,
+            fields={**fields, "delivery_state": delivery_state},
+        )
+        assert task.allowed_actions == (HumanDecisionAction.RECONCILE,)
 
 
 def test_reconcile_is_a_distinct_effect_safe_success() -> None:
@@ -760,6 +785,25 @@ def test_reconcile_is_a_distinct_effect_safe_success() -> None:
         }
     )
     assert receipt.succeeded
+
+    for missing_success_proof in (
+        {"report_success": None},
+        {"report_success": False},
+        {"transition_receipt_digest": None},
+    ):
+        with pytest.raises(ValidationError, match="completed receipt requires"):
+            HumanDecisionReceiptV1.model_validate(
+                {
+                    **_receipt_fields(),
+                    "action": HumanDecisionAction.RECONCILE,
+                    "state": HumanDecisionReceiptState.COMPLETED,
+                    "reason_code": (
+                        HumanDecisionReceiptReason.RECONCILED_AND_RESUMED
+                    ),
+                    "report_success": True,
+                    **missing_success_proof,
+                }
+            )
 
     for action in (
         HumanDecisionAction.VERIFY_AND_RESUME,
