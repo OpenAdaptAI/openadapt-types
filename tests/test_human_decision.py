@@ -309,6 +309,17 @@ def _receipt_fields() -> dict[str, object]:
     }
 
 
+def _action_for_receipt_reason(reason: str | HumanDecisionReceiptReason) -> str:
+    value = reason.value if isinstance(reason, HumanDecisionReceiptReason) else reason
+    return {
+        "skipped_and_resumed": "skip",
+        "reconciled_and_resumed": "reconcile",
+        "demonstration_requested": "teach",
+        "escalation_recorded": "escalate",
+        "rejected_by_operator": "reject",
+    }.get(value, "verify_and_resume")
+
+
 #: Every terminal outcome the runtime engine really produces, in the exact
 #: (state, reason_code) pairing the receipt must accept. ``expired`` is
 #: reachable through admission rather than through an engine decision record,
@@ -349,13 +360,7 @@ def test_receipt_represents_every_real_engine_terminal_outcome(
             "state": state,
             "reason_code": reason_code,
             "report_success": state == "completed",
-            "action": (
-                "skip"
-                if reason_code == "skipped_and_resumed"
-                else "reject"
-                if reason_code == "rejected_by_operator"
-                else "verify_and_resume"
-            ),
+            "action": _action_for_receipt_reason(reason_code),
         }
     )
     assert receipt.state.value == state
@@ -369,6 +374,7 @@ def test_receipt_reason_code_is_closed_and_never_free_text() -> None:
         "pending_runner",
         "verified_and_resumed",
         "skipped_and_resumed",
+        "reconciled_and_resumed",
         "continuation_halted",
         "revalidation_refused",
         "expired",
@@ -512,6 +518,7 @@ def test_receipt_state_and_reason_code_cannot_be_paired_arbitrarily() -> None:
                 "state": state,
                 "reason_code": reason,
                 "report_success": None,
+                "action": _action_for_receipt_reason(reason),
             }
             if reason in reasons:
                 assert HumanDecisionReceiptV1.model_validate(fields).state is state
@@ -537,6 +544,7 @@ def test_receipt_cannot_report_success_outside_a_success_state() -> None:
             "state": state,
             "reason_code": reason,
             "report_success": True,
+            "action": _action_for_receipt_reason(reason),
         }
         if state in HUMAN_DECISION_RECEIPT_SUCCESS_STATES:
             assert HumanDecisionReceiptV1.model_validate(fields).report_success is True
@@ -559,6 +567,7 @@ def test_receipt_action_reuses_the_portable_task_vocabulary() -> None:
         "reject",
         "teach",
         "escalate",
+        "reconcile",
     }
     with pytest.raises(ValidationError):
         HumanDecisionReceiptV1.model_validate(
@@ -735,8 +744,66 @@ def test_a_task_can_advertise_the_complete_action_vocabulary() -> None:
     fields = _task_fields()
     fields["allowed_actions"] = tuple(HumanDecisionAction)
     task = sign_human_decision_task_hmac(key=b"k" * 32, fields=fields)
-    assert len(task.allowed_actions) == len(HumanDecisionAction) == 5
+    assert len(task.allowed_actions) == len(HumanDecisionAction) == 6
     assert task.verify_hmac(b"k" * 32)
+
+
+def test_reconcile_is_a_distinct_effect_safe_success() -> None:
+    """Reconciliation proves the prior effect; it does not re-dispatch it."""
+    receipt = HumanDecisionReceiptV1.model_validate(
+        {
+            **_receipt_fields(),
+            "action": HumanDecisionAction.RECONCILE,
+            "state": HumanDecisionReceiptState.COMPLETED,
+            "reason_code": HumanDecisionReceiptReason.RECONCILED_AND_RESUMED,
+            "report_success": True,
+        }
+    )
+    assert receipt.succeeded
+
+    for action in (
+        HumanDecisionAction.VERIFY_AND_RESUME,
+        HumanDecisionAction.SKIP,
+    ):
+        with pytest.raises(ValidationError, match="requires action 'reconcile'"):
+            HumanDecisionReceiptV1.model_validate(
+                {
+                    **_receipt_fields(),
+                    "action": action,
+                    "state": HumanDecisionReceiptState.COMPLETED,
+                    "reason_code": HumanDecisionReceiptReason.RECONCILED_AND_RESUMED,
+                    "report_success": True,
+                }
+            )
+
+
+@pytest.mark.parametrize(
+    ("action", "reason"),
+    [
+        (
+            HumanDecisionAction.SKIP,
+            HumanDecisionReceiptReason.VERIFIED_AND_RESUMED,
+        ),
+        (
+            HumanDecisionAction.VERIFY_AND_RESUME,
+            HumanDecisionReceiptReason.SKIPPED_AND_RESUMED,
+        ),
+    ],
+)
+def test_completed_receipt_reason_is_bound_to_the_action(
+    action: HumanDecisionAction,
+    reason: HumanDecisionReceiptReason,
+) -> None:
+    with pytest.raises(ValidationError, match="requires action"):
+        HumanDecisionReceiptV1.model_validate(
+            {
+                **_receipt_fields(),
+                "action": action,
+                "state": HumanDecisionReceiptState.COMPLETED,
+                "reason_code": reason,
+                "report_success": True,
+            }
+        )
 
 
 def test_rejected_is_terminal_and_distinct_from_escalated() -> None:
