@@ -426,3 +426,28 @@ def test_packaged_schemas_and_canonical_match_vector_are_exact() -> None:
     assert manifest.digest == vector["manifest_digest"]
     assert requirements.digest == vector["requirements_digest"]
     assert match.model_dump(mode="json") == vector["expected_match"]
+
+
+def test_packaged_negative_vectors_reject_duplicate_and_cross_lane_borrowing() -> None:
+    packaged = files("openadapt_types.schemas")
+    vector = json.loads(
+        packaged.joinpath("runner-capability-negative-v1.vector.json").read_text()
+    )
+    cases = {case["case_id"]: case for case in vector["cases"]}
+
+    duplicate = cases["duplicate_surface_mode_lane"]
+    with pytest.raises(ValidationError, match="unique surface and execution-mode"):
+        RunnerCapabilityManifestV1.model_validate(duplicate["manifest"])
+    assert duplicate["expected_manifest_accepted"] is False
+    assert duplicate["expected_rejection"] == "duplicate_surface_mode_lane"
+    assert duplicate["expected_match"] is None
+
+    borrowing = cases["cross_lane_capability_and_effect_borrowing"]
+    match = match_runner_capabilities(
+        RunnerCapabilityManifestV1.model_validate(borrowing["manifest"]),
+        ExecutionRequirementsV1.model_validate(borrowing["requirements"]),
+        at=borrowing["match_at"],
+    )
+    assert borrowing["expected_manifest_accepted"] is True
+    assert borrowing["expected_rejection"] is None
+    assert match.model_dump(mode="json") == borrowing["expected_match"]
