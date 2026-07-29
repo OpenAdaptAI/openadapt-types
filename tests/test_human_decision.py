@@ -190,6 +190,38 @@ def test_v2_task_revision_stays_inside_the_shared_javascript_range() -> None:
         )
 
 
+@pytest.mark.parametrize(
+    "timestamp",
+    ["2026-07-26T12:00:00.1234567Z", "2026-07-26T12:00:00.123456789Z"],
+)
+def test_v2_refuses_timestamp_precision_python_cannot_compare(timestamp: str) -> None:
+    with pytest.raises(ValidationError):
+        sign_human_decision_task_v2_hmac(
+            key=b"k" * 32,
+            fields={**_v2_task_fields(), "created_at": timestamp},
+        )
+
+
+def test_v2_compares_microsecond_timestamps_without_truncation() -> None:
+    fields = {
+        **_v2_task_fields(),
+        "created_at": "2026-07-26T12:00:00.123456Z",
+        "expires_at": "2026-07-26T12:00:00.123457Z",
+    }
+    accepted = sign_human_decision_task_v2_hmac(key=b"k" * 32, fields=fields)
+    assert accepted.created_at == fields["created_at"]
+
+    with pytest.raises(ValidationError, match="expires_at must be after created_at"):
+        sign_human_decision_task_v2_hmac(
+            key=b"k" * 32,
+            fields={
+                **fields,
+                "created_at": "2026-07-26T12:00:00.123457Z",
+                "expires_at": "2026-07-26T12:00:00.123456Z",
+            },
+        )
+
+
 def test_v2_round_trips_and_refuses_runtime_evidence_or_unknown_fields() -> None:
     task = sign_human_decision_task_v2_hmac(key=b"k" * 32, fields=_v2_task_fields())
     payload = task.model_dump(mode="json")

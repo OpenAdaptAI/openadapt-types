@@ -115,6 +115,12 @@ _SIGNATURE_PATTERN = r"^hmac-sha256:[0-9a-f]{64}$"
 _TIMESTAMP_PATTERN = (
     r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,9})?(Z|[+-]\d{2}:\d{2})$"
 )
+# Python's datetime parser preserves at most microseconds.  V2 does not accept
+# precision it cannot compare faithfully.  V1 retains its established wire
+# contract and pattern unchanged.
+_V2_TIMESTAMP_PATTERN = (
+    r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,6})?(Z|[+-]\d{2}:\d{2})$"
+)
 # A qualified label is presentation metadata selected when a workflow is
 # qualified.  It is not an observation, an identifier, or a runtime-derived
 # value.  Keep the alphabet deliberately small so the shared contract cannot
@@ -403,6 +409,12 @@ class HumanDecisionTaskV2(HumanDecisionTaskV1):
     # maximum.  V2 must not sign a value that an existing consumer cannot
     # round-trip; V1 remains unchanged for byte compatibility.
     task_revision: StrictInt = Field(default=1, ge=1, le=2_147_483_647)
+    created_at: StrictStr = Field(
+        min_length=20, max_length=40, pattern=_V2_TIMESTAMP_PATTERN
+    )
+    expires_at: StrictStr = Field(
+        min_length=20, max_length=40, pattern=_V2_TIMESTAMP_PATTERN
+    )
     qualification_project_id: StrictStr = Field(pattern=_OPAQUE_ID_PATTERN)
     qualification_revision_id: StrictStr = Field(pattern=_OPAQUE_ID_PATTERN)
     qualification_contract_digest: StrictStr = Field(pattern=_SHA256_PATTERN)
