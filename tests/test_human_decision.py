@@ -175,6 +175,21 @@ def test_v2_canonical_vector_is_stable_for_other_languages() -> None:
     assert task.signature == V2_CANONICAL_VECTOR_SIGNATURE
 
 
+def test_v2_task_revision_stays_inside_the_shared_javascript_range() -> None:
+    maximum = 2_147_483_647
+    accepted = sign_human_decision_task_v2_hmac(
+        key=b"k" * 32,
+        fields={**_v2_task_fields(), "task_revision": maximum},
+    )
+    assert accepted.task_revision == maximum
+
+    with pytest.raises(ValidationError):
+        sign_human_decision_task_v2_hmac(
+            key=b"k" * 32,
+            fields={**_v2_task_fields(), "task_revision": maximum + 1},
+        )
+
+
 def test_v2_round_trips_and_refuses_runtime_evidence_or_unknown_fields() -> None:
     task = sign_human_decision_task_v2_hmac(key=b"k" * 32, fields=_v2_task_fields())
     payload = task.model_dump(mode="json")

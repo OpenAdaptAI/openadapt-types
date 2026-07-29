@@ -399,6 +399,10 @@ class HumanDecisionTaskV2(HumanDecisionTaskV1):
     schema_version: Literal["openadapt.human-decision-task/v2"] = (
         HUMAN_DECISION_TASK_V2_SCHEMA
     )
+    # Cloud's JavaScript reader accepts signed revisions only through this
+    # maximum.  V2 must not sign a value that an existing consumer cannot
+    # round-trip; V1 remains unchanged for byte compatibility.
+    task_revision: StrictInt = Field(default=1, ge=1, le=2_147_483_647)
     qualification_project_id: StrictStr = Field(pattern=_OPAQUE_ID_PATTERN)
     qualification_revision_id: StrictStr = Field(pattern=_OPAQUE_ID_PATTERN)
     qualification_contract_digest: StrictStr = Field(pattern=_SHA256_PATTERN)
