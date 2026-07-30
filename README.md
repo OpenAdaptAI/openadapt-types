@@ -206,6 +206,8 @@ small Python client. The reference Python and TypeScript clients are in
 [`examples/execute`](examples/execute/). Use `https://app.openadapt.ai/api` as
 the OpenAdapt Cloud base URL. It uses a partner-provisioned bearer token and
 the client appends the stable `/v1` paths.
+The client requires an HTTPS base URL and rejects redirects before it can send
+the bearer token to another endpoint.
 
 ```python
 from openadapt_types import ExecuteClient

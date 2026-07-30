@@ -52,11 +52,11 @@ def execute_openapi_document() -> dict[str, Any]:
             ),
         },
         "x-openadapt-schema": EXECUTE_OPENAPI_SCHEMA,
-        "security": [{"bearerAuth": []}],
         "paths": {
             "/v1/executions": {
                 "post": {
                     "operationId": "createExecution",
+                    "security": [{"bearerAuth": []}],
                     "requestBody": {
                         "required": True,
                         "content": {
@@ -80,6 +80,7 @@ def execute_openapi_document() -> dict[str, Any]:
             "/v1/executions/{execution_id}": {
                 "get": {
                     "operationId": "getExecution",
+                    "security": [{"bearerAuth": []}],
                     "parameters": [execution_id],
                     "responses": {
                         "200": {
@@ -96,6 +97,7 @@ def execute_openapi_document() -> dict[str, Any]:
             "/v1/executions/{execution_id}/receipt": {
                 "get": {
                     "operationId": "getExecutionReceipt",
+                    "security": [{"bearerAuth": []}],
                     "parameters": [execution_id],
                     "responses": {
                         "200": {
@@ -113,6 +115,11 @@ def execute_openapi_document() -> dict[str, Any]:
         "webhooks": {
             "executionStateChanged": {
                 "post": {
+                    "security": [],
+                    "description": (
+                        "Verify the body HMAC with the published Execute v1 "
+                        "webhook contract before accepting this delivery."
+                    ),
                     "requestBody": {
                         "required": True,
                         "content": {
@@ -128,6 +135,11 @@ def execute_openapi_document() -> dict[str, Any]:
             },
             "executionTerminal": {
                 "post": {
+                    "security": [],
+                    "description": (
+                        "Verify the body HMAC with the published Execute v1 "
+                        "webhook contract before accepting this delivery."
+                    ),
                     "requestBody": {
                         "required": True,
                         "content": {
@@ -143,6 +155,11 @@ def execute_openapi_document() -> dict[str, Any]:
             },
             "executionDecisionRequired": {
                 "post": {
+                    "security": [],
+                    "description": (
+                        "Verify the body HMAC with the published Execute v1 "
+                        "webhook contract before accepting this delivery."
+                    ),
                     "requestBody": {
                         "required": True,
                         "content": {

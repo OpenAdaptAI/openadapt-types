@@ -11,7 +11,8 @@ import json
 from dataclasses import dataclass, field
 from typing import Any, Final
 from urllib.error import HTTPError, URLError
-from urllib.request import Request, urlopen
+from urllib.parse import quote, urlsplit
+from urllib.request import HTTPRedirectHandler, Request, build_opener
 
 from openadapt_types.execute import (
     ExecuteAcceptedV1,
@@ -21,6 +22,24 @@ from openadapt_types.execute import (
 )
 
 _JSON_CONTENT_TYPE: Final = "application/json"
+
+
+class _RejectRedirectHandler(HTTPRedirectHandler):
+    """Stop before urllib can forward a bearer token to another origin."""
+
+    def redirect_request(  # type: ignore[override]
+        self,
+        req: Request,
+        fp: Any,
+        code: int,
+        msg: str,
+        headers: Any,
+        newurl: str,
+    ) -> Request:
+        raise HTTPError(req.full_url, code, "Execute redirects are not allowed", headers, fp)
+
+
+_NO_REDIRECT_OPENER: Final = build_opener(_RejectRedirectHandler())
 
 
 class ExecuteApiError(RuntimeError):
@@ -45,8 +64,18 @@ class ExecuteClient:
     timeout_seconds: float = 30.0
 
     def __post_init__(self) -> None:
-        if not self.base_url.strip():
-            raise ValueError("base_url must not be empty")
+        parsed = urlsplit(self.base_url)
+        if (
+            parsed.scheme != "https"
+            or not parsed.netloc
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.query
+            or parsed.fragment
+        ):
+            raise ValueError(
+                "base_url must be an HTTPS origin or path prefix without credentials, query, or fragment"
+            )
         if not self.bearer_token.strip():
             raise ValueError("bearer_token must not be empty")
         if self.timeout_seconds <= 0:
@@ -66,7 +95,7 @@ class ExecuteClient:
         """Return the current public lifecycle state."""
 
         response = self._json_request(
-            method="GET", path=f"/v1/executions/{execution_id}"
+            method="GET", path=f"/v1/executions/{quote(execution_id, safe='')}"
         )
         return ExecuteStatusV1.model_validate(response)
 
@@ -74,7 +103,7 @@ class ExecuteClient:
         """Return the terminal receipt after the execution reaches TERMINAL."""
 
         response = self._json_request(
-            method="GET", path=f"/v1/executions/{execution_id}/receipt"
+            method="GET", path=f"/v1/executions/{quote(execution_id, safe='')}/receipt"
         )
         return ExecuteEvidenceReceiptV1.model_validate(response)
 
@@ -93,10 +122,10 @@ class ExecuteClient:
             },
         )
         try:
-            with urlopen(request, timeout=self.timeout_seconds) as response:  # noqa: S310
+            with _NO_REDIRECT_OPENER.open(request, timeout=self.timeout_seconds) as response:
                 raw = response.read()
         except HTTPError as exc:
-            detail = exc.read().decode("utf-8", errors="replace")
+            detail = "" if exc.fp is None else exc.read().decode("utf-8", errors="replace")
             raise ExecuteApiError(exc.code, detail or exc.reason) from exc
         except URLError as exc:
             raise ExecuteApiError(None, str(exc.reason)) from exc
