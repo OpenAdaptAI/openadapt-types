@@ -52,6 +52,7 @@ def execute_openapi_document() -> dict[str, Any]:
             ),
         },
         "x-openadapt-schema": EXECUTE_OPENAPI_SCHEMA,
+        "security": [{"bearerAuth": []}],
         "paths": {
             "/v1/executions": {
                 "post": {
@@ -156,5 +157,18 @@ def execute_openapi_document() -> dict[str, Any]:
                 }
             },
         },
-        "components": {"schemas": schemas},
+        "components": {
+            "schemas": schemas,
+            "securitySchemes": {
+                "bearerAuth": {
+                    "type": "http",
+                    "scheme": "bearer",
+                    "bearerFormat": "OpenAdapt Execute partner token",
+                    "description": (
+                        "A partner-provisioned, scope-limited service token. "
+                        "Do not put it in browser code or workflow parameters."
+                    ),
+                }
+            },
+        },
     }

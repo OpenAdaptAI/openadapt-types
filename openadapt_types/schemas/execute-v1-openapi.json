@@ -905,6 +905,14 @@
         "type": "object"
       },
       "JsonValue": {}
+    },
+    "securitySchemes": {
+      "bearerAuth": {
+        "bearerFormat": "OpenAdapt Execute partner token",
+        "description": "A partner-provisioned, scope-limited service token. Do not put it in browser code or workflow parameters.",
+        "scheme": "bearer",
+        "type": "http"
+      }
     }
   },
   "info": {
@@ -999,6 +1007,11 @@
       }
     }
   },
+  "security": [
+    {
+      "bearerAuth": []
+    }
+  ],
   "webhooks": {
     "executionDecisionRequired": {
       "post": {
