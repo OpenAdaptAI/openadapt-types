@@ -209,10 +209,11 @@ It keeps `waiting_for_reconciliation` as a lifecycle state and
 The separate `business-decision-*-v1.json` files define a finite human branch
 that the workflow declared before execution. They do not reuse the operational
 halt actions. They carry only opaque bindings, option IDs, digests, counts, and
-closed status values. The reviewed question and option text live in a signed
-presentation artifact, while screenshots and live record values stay on the
-customer runner. An accepted answer only selects a compiled branch. The next
-action must still pass its live-state, identity, policy, and effect contracts.
+closed status values. The reviewed question and option text live in a
+presentation artifact whose digest is bound by the signed delivery policy.
+Screenshots and live record values stay on the customer runner. An accepted
+answer only selects a compiled branch. The next action must still pass its
+live-state, identity, policy, and effect contracts.
 
 ## OpenAdapt Execute v1
 
