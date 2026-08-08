@@ -14,11 +14,25 @@ from openadapt_types import (
     BusinessDecisionDeliveryPolicyV1,
     BusinessDecisionPresentationV1,
     BusinessDecisionTaskV1,
+    ExecuteDecisionRequiredWebhookV1,
+    ExecuteWebhookEventTypeV1,
+    HumanDecisionAction,
+    HumanDecisionDeliveryState,
+    HumanDecisionEvidenceSummaryV1,
+    HumanDecisionQuestionTemplate,
+    HumanDecisionQuestionV1,
+    HumanDecisionRequiredAuthn,
+    HumanDecisionSafeSlotsV1,
+    HumanDecisionTaskKind,
+    HumanDecisionTaskV1,
     sign_business_decision_answer_hmac,
     sign_business_decision_answer_receipt_hmac,
     sign_business_decision_delivery_policy_hmac,
     sign_business_decision_task_hmac,
+    sign_execute_webhook_hmac,
+    sign_human_decision_task_hmac,
     validate_business_decision_answer,
+    validate_business_decision_delivery,
 )
 
 KEY = b"k" * 32
@@ -87,6 +101,29 @@ def _answer_fields(task: BusinessDecisionTaskV1) -> dict[str, object]:
         "authentication_context_digest": _digest("0"),
         "answered_at": "2026-08-08T12:01:00Z",
         "issuer_key_id": "cloud_signing_001",
+    }
+
+
+def _operational_task_fields() -> dict[str, object]:
+    return {
+        "task_id": "task_operational_01",
+        "run_id": "run_operational_001",
+        "pause_id": "pause_operational_01",
+        "capability_digest": _digest("1"),
+        "bundle_digest": _digest("2"),
+        "task_kind": HumanDecisionTaskKind.IDENTITY,
+        "delivery_state": HumanDecisionDeliveryState.NOT_DELIVERED,
+        "question": HumanDecisionQuestionV1(
+            template=HumanDecisionQuestionTemplate.CONFIRM_IDENTITY,
+            safe_slots=HumanDecisionSafeSlotsV1(required_signal_count=2),
+        ),
+        "evidence": HumanDecisionEvidenceSummaryV1(identity_required_count=2),
+        "allowed_actions": (HumanDecisionAction.VERIFY_AND_RESUME,),
+        "required_authn": HumanDecisionRequiredAuthn.LOCAL_SESSION,
+        "created_at": "2026-08-08T12:00:00Z",
+        "expires_at": "2026-08-08T12:05:00Z",
+        "nonce": "nonce_operational_01",
+        "issuer_key_id": "runner_signing_01",
     }
 
 
@@ -256,16 +293,82 @@ def test_runner_receipt_never_reports_business_success() -> None:
 
 
 def test_delivery_policy_binds_reviewed_copy_and_remote_authority() -> None:
+    review_digest = _digest("9")
     presentation = BusinessDecisionPresentationV1(
         presentation_ref="present_12345678",
         presentation_revision=1,
         decision_contract_digest=_digest("7"),
         decision_contract_revision=4,
-        question="Which reviewed path should continue?",
-        options=(
-            {"option_id": "approve", "label": "Approve"},
-            {"option_id": "decline", "label": "Decline"},
+        category={
+            "text": "Schedule exception",
+            "classification": "reviewed_remote_safe",
+            "egress_review_digest": review_digest,
+        },
+        title={
+            "text": "Choose the reviewed path",
+            "classification": "reviewed_remote_safe",
+            "egress_review_digest": review_digest,
+        },
+        role_label={
+            "text": "Scheduling lead",
+            "classification": "reviewed_remote_safe",
+            "egress_review_digest": review_digest,
+        },
+        question={
+            "text": "Which reviewed path should continue?",
+            "classification": "reviewed_remote_safe",
+            "egress_review_digest": review_digest,
+        },
+        why_judgment_needed={
+            "text": "The local policy leaves this exception to the scheduling lead.",
+            "classification": "reviewed_remote_safe",
+            "egress_review_digest": review_digest,
+        },
+        context_cards=(
+            {
+                "context_id": "context_policy_01",
+                "kind": "policy",
+                "label": {
+                    "text": "Policy",
+                    "classification": "reviewed_remote_safe",
+                    "egress_review_digest": review_digest,
+                },
+                "value": {
+                    "text": "Use the approved exception path.",
+                    "classification": "reviewed_remote_safe",
+                    "egress_review_digest": review_digest,
+                },
+            },
         ),
+        options=(
+            {
+                "option_id": "approve",
+                "label": {
+                    "text": "Approve",
+                    "classification": "reviewed_remote_safe",
+                    "egress_review_digest": review_digest,
+                },
+                "detail": {
+                    "text": "Continue to the qualified exception branch.",
+                    "classification": "reviewed_remote_safe",
+                    "egress_review_digest": review_digest,
+                },
+                "consequence": {
+                    "text": "The runner will revalidate the live state before action.",
+                    "classification": "reviewed_remote_safe",
+                    "egress_review_digest": review_digest,
+                },
+            },
+            {
+                "option_id": "decline",
+                "label": {
+                    "text": "Decline",
+                    "classification": "reviewed_remote_safe",
+                    "egress_review_digest": review_digest,
+                },
+            },
+        ),
+        reason_codes=("institutional_knowledge_required", "policy_exception"),
         review_contract_digest=_digest("8"),
     )
     policy = sign_business_decision_delivery_policy_hmac(
@@ -277,7 +380,8 @@ def test_delivery_policy_binds_reviewed_copy_and_remote_authority() -> None:
             "decision_contract_revision": presentation.decision_contract_revision,
             "presentation_ref": presentation.presentation_ref,
             "presentation_digest": presentation.digest,
-            "authorized_role_refs": ("role_approver_01",),
+            "presentation_egress_review_digest": review_digest,
+            "authorized_role_refs": ("role_approver_01", "role_reviewer_01"),
             "authorized_route_refs": ("route_mobile_001",),
             "authorized_answer_issuer_key_ids": ("cloud_signing_001",),
             "role_mapping_digest": "hmac-sha256:" + "d" * 64,
@@ -291,6 +395,40 @@ def test_delivery_policy_binds_reviewed_copy_and_remote_authority() -> None:
     )
     assert policy.verify_hmac(KEY)
     assert policy.presentation_digest == presentation.digest
+
+    task = sign_business_decision_task_hmac(
+        key=KEY,
+        fields={
+            **_task_fields(),
+            "delivery_policy_digest": policy.digest,
+            "presentation_digest": presentation.digest,
+        },
+    )
+    validate_business_decision_delivery(
+        task,
+        presentation,
+        policy,
+        task_signing_key=KEY,
+        qualification_signing_key=KEY,
+        at="2026-08-08T12:01:00Z",
+    )
+
+    changed_presentation = presentation.model_copy(
+        update={
+            "question": presentation.question.model_copy(
+                update={"text": "Which other reviewed path should continue?"}
+            )
+        }
+    )
+    with pytest.raises(ValueError, match="presentation_digest"):
+        validate_business_decision_delivery(
+            task,
+            changed_presentation,
+            policy,
+            task_signing_key=KEY,
+            qualification_signing_key=KEY,
+            at="2026-08-08T12:01:00Z",
+        )
 
 
 def test_short_answer_idempotency_key_is_refused() -> None:
@@ -360,12 +498,15 @@ def _unconstrained_string_paths(schema: object) -> list[str]:
     [
         (BusinessDecisionTaskV1, "business-decision-task-v1.json"),
         (BusinessDecisionAnswerV1, "business-decision-answer-v1.json"),
-        (BusinessDecisionPresentationV1, "business-decision-presentation-v1.json"),
         (BusinessDecisionDeliveryPolicyV1, "business-decision-delivery-policy-v1.json"),
     ],
 )
-def test_cloud_safe_contract_has_no_free_text_or_sensitive_extension(
-    model: type[BusinessDecisionTaskV1 | BusinessDecisionAnswerV1],
+def test_portable_contract_has_no_free_text_or_sensitive_extension(
+    model: type[
+        BusinessDecisionTaskV1
+        | BusinessDecisionAnswerV1
+        | BusinessDecisionDeliveryPolicyV1
+    ],
     filename: str,
 ) -> None:
     schema = model.model_json_schema()
@@ -389,6 +530,88 @@ def test_unknown_live_context_fields_are_structurally_refused() -> None:
     }.items():
         with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
             BusinessDecisionTaskV1.model_validate({**payload, field: value})
+
+
+def test_remote_delivery_refuses_unreviewed_arbitrary_human_text() -> None:
+    base = {
+        "presentation_ref": "present_12345678",
+        "presentation_revision": 1,
+        "decision_contract_digest": _digest("7"),
+        "decision_contract_revision": 4,
+        "question": {
+            "text": "Approve live patient John Smith, MRN 123456?",
+            "classification": "local_only",
+        },
+        "options": (
+            {
+                "option_id": "approve",
+                "label": {
+                    "text": "Approve John Smith",
+                    "classification": "local_only",
+                },
+            },
+            {
+                "option_id": "decline",
+                "label": {
+                    "text": "Decline",
+                    "classification": "local_only",
+                },
+            },
+        ),
+        "review_contract_digest": _digest("8"),
+    }
+    presentation = BusinessDecisionPresentationV1.model_validate(base)
+    review_digest = _digest("9")
+    policy = sign_business_decision_delivery_policy_hmac(
+        key=KEY,
+        fields={
+            "policy_ref": "policy_12345678",
+            "policy_revision": 1,
+            "decision_contract_digest": presentation.decision_contract_digest,
+            "decision_contract_revision": presentation.decision_contract_revision,
+            "presentation_ref": presentation.presentation_ref,
+            "presentation_digest": presentation.digest,
+            "presentation_egress_review_digest": review_digest,
+            "authorized_role_refs": ("role_approver_01", "role_reviewer_01"),
+            "authorized_route_refs": ("route_mobile_001",),
+            "authorized_answer_issuer_key_ids": ("cloud_signing_001",),
+            "role_mapping_digest": "hmac-sha256:" + "d" * 64,
+            "required_authn": "aal2",
+            "delivery_mode": "remote_answerable",
+            "relay_capability_digest": _digest("e"),
+            "created_at": "2026-08-08T12:00:00Z",
+            "expires_at": "2026-08-08T12:05:00Z",
+            "issuer_key_id": "qualification_key_01",
+        },
+    )
+    task = sign_business_decision_task_hmac(
+        key=KEY,
+        fields={
+            **_task_fields(),
+            "delivery_policy_digest": policy.digest,
+            "presentation_digest": presentation.digest,
+        },
+    )
+    with pytest.raises(ValueError, match="local-only text"):
+        validate_business_decision_delivery(
+            task,
+            presentation,
+            policy,
+            task_signing_key=KEY,
+            qualification_signing_key=KEY,
+            at="2026-08-08T12:01:00Z",
+        )
+
+    with pytest.raises(ValidationError, match="egress review digest"):
+        BusinessDecisionPresentationV1.model_validate(
+            {
+                **base,
+                "question": {
+                    "text": "Approve live patient John Smith, MRN 123456?",
+                    "classification": "reviewed_remote_safe",
+                },
+            }
+        )
 
 
 def test_option_ids_are_finite_and_unique() -> None:
@@ -416,3 +639,49 @@ def test_option_ids_are_finite_and_unique() -> None:
             key=KEY,
             fields={**_task_fields(), "options": too_many},
         )
+
+
+def test_execute_decision_webhook_preserves_operational_and_business_tasks() -> None:
+    operational = sign_human_decision_task_hmac(
+        key=KEY,
+        fields=_operational_task_fields(),
+    )
+    operational_webhook = sign_execute_webhook_hmac(
+        key=KEY,
+        fields={
+            "event_type": ExecuteWebhookEventTypeV1.DECISION_REQUIRED,
+            "event_id": "event_operational_01",
+            "delivery_attempt": 1,
+            "issued_at": "2026-08-08T12:00:01Z",
+            "issuer_key_id": "webhook_signing_01",
+            "execution_id": "execution_operational_01",
+            "decision": operational.model_dump(mode="json"),
+        },
+    )
+    assert isinstance(operational_webhook.decision, HumanDecisionTaskV1)
+    assert operational_webhook.decision == operational
+
+    business = sign_business_decision_task_hmac(key=KEY, fields=_task_fields())
+    business_webhook = sign_execute_webhook_hmac(
+        key=KEY,
+        fields={
+            "event_type": ExecuteWebhookEventTypeV1.DECISION_REQUIRED,
+            "event_id": "event_business_0001",
+            "delivery_attempt": 1,
+            "issued_at": "2026-08-08T12:00:01Z",
+            "issuer_key_id": "webhook_signing_01",
+            "execution_id": "execution_business_0001",
+            "decision": business.model_dump(mode="json"),
+        },
+    )
+    reparsed = ExecuteDecisionRequiredWebhookV1.model_validate_json(
+        business_webhook.model_dump_json()
+    )
+    assert isinstance(reparsed.decision, BusinessDecisionTaskV1)
+    assert reparsed.decision == business
+    assert reparsed.verify_hmac(KEY)
+
+    schema = json.dumps(ExecuteDecisionRequiredWebhookV1.model_json_schema())
+    assert "BusinessDecisionTaskV1" in schema
+    assert "HumanDecisionTaskV1" in schema
+    assert '"propertyName": "schema_version"' in schema

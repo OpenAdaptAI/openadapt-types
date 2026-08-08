@@ -12,10 +12,12 @@ the selected option through Flow's business-decision store, reacquire the live
 application state, and pass the successor action's normal identity and effect
 contracts before it actuates.
 
-No question text, option label, screenshot, OCR output, record value, or live
-identifier belongs in this wire format.  A consumer renders reviewed static
-copy from the exact ``presentation_digest``.  A decision that needs protected
-context is ``local_answer_required`` and cannot be answered by a remote client.
+The task and answer envelopes contain no question text, option label,
+screenshot, OCR output, record value, or live identifier.  A separate
+presentation artifact carries reviewed static copy.  Each text field is either
+local-only or bound to a positive egress review.  A remote projection refuses
+local-only or unreviewed copy.  A decision that needs protected context is
+``local_answer_required`` and cannot be answered by a remote client.
 """
 
 from __future__ import annotations
@@ -50,6 +52,7 @@ _TASK_DOMAIN = b"openadapt.business-decision-task/v1\x00"
 _ANSWER_DOMAIN = b"openadapt.business-decision-answer/v1\x00"
 _DELIVERY_POLICY_DOMAIN = b"openadapt.business-decision-delivery-policy/v1\x00"
 _ANSWER_RECEIPT_DOMAIN = b"openadapt.business-decision-answer-receipt/v1\x00"
+_PRESENTATION_TEXT_DOMAIN = b"openadapt.business-decision-presentation-text/v1\x00"
 _OPAQUE_ID_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$"
 _OPTION_ID_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$"
 _IDEMPOTENCY_KEY_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9._:-]{15,199}$"
@@ -89,23 +92,97 @@ class BusinessDecisionOptionBindingV1(_StrictContract):
     target_binding_digest: StrictStr = Field(pattern=_SHA256_PATTERN)
 
 
+class BusinessDecisionPresentationClassification(str, Enum):
+    """The reviewed egress class for one static presentation field."""
+
+    LOCAL_ONLY = "local_only"
+    REVIEWED_REMOTE_SAFE = "reviewed_remote_safe"
+
+
+class BusinessDecisionContextKind(str, Enum):
+    """Closed kinds for reviewed institutional context."""
+
+    POLICY = "policy"
+    PRECEDENT = "precedent"
+    RELATIONSHIP = "relationship"
+    CAPACITY = "capacity"
+    TIMING = "timing"
+    RISK = "risk"
+    OTHER_REVIEWED = "other_reviewed"
+
+
+class BusinessDecisionJudgmentReason(str, Enum):
+    """Finite reasons why the qualified workflow retains human authority."""
+
+    INSTITUTIONAL_KNOWLEDGE_REQUIRED = "institutional_knowledge_required"
+    POLICY_EXCEPTION = "policy_exception"
+    COMPETING_PRIORITIES = "competing_priorities"
+    RELATIONSHIP_CONTEXT = "relationship_context"
+    CAPACITY_CONSTRAINT = "capacity_constraint"
+    TEMPORAL_CONTEXT = "temporal_context"
+    RISK_ACCEPTANCE = "risk_acceptance"
+    OTHER_REVIEWED = "other_reviewed"
+
+
+class BusinessDecisionPresentationTextV1(_StrictContract):
+    """One static text field and its positive egress-review binding."""
+
+    text: StrictStr = Field(
+        min_length=1,
+        max_length=500,
+        pattern=_STATIC_PRESENTATION_TEXT_PATTERN,
+    )
+    classification: BusinessDecisionPresentationClassification
+    egress_review_digest: StrictStr | None = Field(
+        default=None,
+        pattern=_SHA256_PATTERN,
+    )
+
+    @model_validator(mode="after")
+    def _validate_egress_review(self) -> BusinessDecisionPresentationTextV1:
+        if self.text.strip() != self.text:
+            raise ValueError("business decision presentation text must be trimmed")
+        if (
+            self.classification
+            is BusinessDecisionPresentationClassification.REVIEWED_REMOTE_SAFE
+        ) != (self.egress_review_digest is not None):
+            raise ValueError(
+                "reviewed remote-safe text requires one egress review digest; "
+                "local-only text cannot carry one"
+            )
+        return self
+
+    @property
+    def content_digest(self) -> str:
+        """Return the canonical digest for the exact reviewed copy."""
+
+        return business_decision_presentation_text_digest(self.text)
+
+
 class BusinessDecisionPresentationOptionV1(_StrictContract):
     """One exact option label from the reviewed workflow contract."""
 
     option_id: StrictStr = Field(pattern=_OPTION_ID_PATTERN)
-    label: StrictStr = Field(
-        min_length=1,
-        max_length=120,
-        pattern=_STATIC_PRESENTATION_TEXT_PATTERN,
-    )
+    label: BusinessDecisionPresentationTextV1
+    detail: BusinessDecisionPresentationTextV1 | None = None
+    consequence: BusinessDecisionPresentationTextV1 | None = None
+
+
+class BusinessDecisionContextCardV1(_StrictContract):
+    """One reviewed static context item; no runtime observation belongs here."""
+
+    context_id: StrictStr = Field(pattern=_OPAQUE_ID_PATTERN)
+    kind: BusinessDecisionContextKind
+    label: BusinessDecisionPresentationTextV1
+    value: BusinessDecisionPresentationTextV1
 
 
 class BusinessDecisionPresentationV1(_StrictContract):
-    """Reviewed static copy for one exact qualified business decision.
+    """Reviewed presentation artifact for one business decision.
 
-    This artifact is separate from the Cloud-safe task because it contains
-    human-readable text. The qualification path must review it before remote
-    use. The signed task carries only this artifact's digest and opaque ref.
+    This artifact is separate from the Cloud-safe task.  The signed delivery
+    policy binds its exact digest and the positive egress review before a
+    remote route can show it.
     """
 
     schema_version: Literal["openadapt.business-decision-presentation/v1"] = (
@@ -115,31 +192,85 @@ class BusinessDecisionPresentationV1(_StrictContract):
     presentation_revision: StrictInt = Field(ge=1, le=2_147_483_647)
     decision_contract_digest: StrictStr = Field(pattern=_SHA256_PATTERN)
     decision_contract_revision: StrictInt = Field(ge=1, le=2_147_483_647)
-    question: StrictStr = Field(
-        min_length=1,
-        max_length=500,
-        pattern=_STATIC_PRESENTATION_TEXT_PATTERN,
+    category: BusinessDecisionPresentationTextV1 | None = None
+    title: BusinessDecisionPresentationTextV1 | None = None
+    role_label: BusinessDecisionPresentationTextV1 | None = None
+    question: BusinessDecisionPresentationTextV1
+    why_judgment_needed: BusinessDecisionPresentationTextV1 | None = None
+    context_cards: tuple[BusinessDecisionContextCardV1, ...] = Field(
+        default=(),
+        max_length=16,
     )
     options: tuple[BusinessDecisionPresentationOptionV1, ...] = Field(
         min_length=2,
         max_length=32,
     )
+    reason_codes: tuple[BusinessDecisionJudgmentReason, ...] = Field(
+        default=(),
+        max_length=8,
+    )
     review_contract_digest: StrictStr = Field(pattern=_SHA256_PATTERN)
-    reviewed_safe_for_remote: Literal[True] = True
 
     @model_validator(mode="after")
     def _validate_presentation(self) -> BusinessDecisionPresentationV1:
-        if self.question.strip() != self.question:
-            raise ValueError("business decision question must be trimmed")
         option_ids = tuple(option.option_id for option in self.options)
-        labels = tuple(option.label for option in self.options)
+        labels = tuple(option.label.text for option in self.options)
         if len(option_ids) != len(set(option_ids)):
             raise ValueError("business decision presentation option ids must be unique")
-        if any(label.strip() != label for label in labels):
-            raise ValueError("business decision presentation labels must be trimmed")
         if len({label.casefold() for label in labels}) != len(labels):
             raise ValueError("business decision presentation labels must be unique")
+        if any(len(label) > 120 for label in labels):
+            raise ValueError(
+                "business decision presentation option labels exceed 120 characters"
+            )
+        context_ids = tuple(card.context_id for card in self.context_cards)
+        if len(context_ids) != len(set(context_ids)):
+            raise ValueError("business decision context ids must be unique")
+        if len(self.reason_codes) != len(set(self.reason_codes)):
+            raise ValueError("business decision reason codes must be unique")
         return self
+
+    def text_fields(self) -> tuple[BusinessDecisionPresentationTextV1, ...]:
+        """Return every classified text leaf in deterministic field order."""
+
+        fields = [
+            field
+            for field in (
+                self.category,
+                self.title,
+                self.role_label,
+                self.question,
+                self.why_judgment_needed,
+            )
+            if field is not None
+        ]
+        for card in self.context_cards:
+            fields.extend((card.label, card.value))
+        for option in self.options:
+            fields.append(option.label)
+            if option.detail is not None:
+                fields.append(option.detail)
+            if option.consequence is not None:
+                fields.append(option.consequence)
+        return tuple(fields)
+
+    @property
+    def egress_review_digests(self) -> frozenset[str]:
+        """Return all positive review bindings in this presentation."""
+
+        values = [field.egress_review_digest for field in self.text_fields()]
+        return frozenset(value for value in values if value is not None)
+
+    @property
+    def remote_safe(self) -> bool:
+        """Return true only when every text field has a positive egress review."""
+
+        return all(
+            field.classification
+            is BusinessDecisionPresentationClassification.REVIEWED_REMOTE_SAFE
+            and field.egress_review_digest is not None
+            for field in self.text_fields()
+        )
 
     def canonical_bytes(self) -> bytes:
         return _canonical_json(self.model_dump(mode="json"))
@@ -161,6 +292,10 @@ class BusinessDecisionDeliveryPolicyV1(_StrictContract):
     decision_contract_revision: StrictInt = Field(ge=1, le=2_147_483_647)
     presentation_ref: StrictStr = Field(pattern=_OPAQUE_ID_PATTERN)
     presentation_digest: StrictStr = Field(pattern=_SHA256_PATTERN)
+    presentation_egress_review_digest: StrictStr | None = Field(
+        default=None,
+        pattern=_SHA256_PATTERN,
+    )
     authorized_role_refs: tuple[_OpaqueRoleRef, ...] = Field(
         min_length=1, max_length=16
     )
@@ -198,6 +333,13 @@ class BusinessDecisionDeliveryPolicyV1(_StrictContract):
             self.created_at, "created_at"
         ):
             raise ValueError("expires_at must be after created_at")
+        if (
+            self.delivery_mode is BusinessDecisionDeliveryMode.REMOTE_ANSWERABLE
+        ) != (self.presentation_egress_review_digest is not None):
+            raise ValueError(
+                "remote delivery requires one presentation egress review digest; "
+                "local-only delivery cannot carry one"
+            )
         return self
 
     def unsigned_payload(self) -> dict[str, Any]:
@@ -548,6 +690,130 @@ def validate_business_decision_answer(
         raise ValueError("the business decision answer was created after expiry")
     if at_time < answered_at:
         raise ValueError("the business decision answer is from the future")
+
+
+def validate_business_decision_delivery(
+    task: BusinessDecisionTaskV1,
+    presentation: BusinessDecisionPresentationV1,
+    policy: BusinessDecisionDeliveryPolicyV1,
+    *,
+    task_signing_key: bytes,
+    qualification_signing_key: bytes,
+    at: str,
+) -> None:
+    """Authenticate one task and its exact reviewed presentation manifest.
+
+    This check authenticates only the portable delivery bindings.  A remote
+    consumer can render only copy that has the exact positive egress-review
+    binding in the signed policy.  This check does not authorize execution and
+    does not prove a business effect.
+    """
+
+    if not task.verify_hmac(task_signing_key):
+        raise ValueError("the business decision task signature is invalid")
+    if not policy.verify_hmac(qualification_signing_key):
+        raise ValueError("the business decision delivery policy signature is invalid")
+
+    at_time = _parse_timestamp(at, "at")
+    policy_created_at = _parse_timestamp(policy.created_at, "policy.created_at")
+    policy_expires_at = _parse_timestamp(policy.expires_at, "policy.expires_at")
+    task_created_at = _parse_timestamp(task.created_at, "task.created_at")
+    task_expires_at = _parse_timestamp(task.expires_at, "task.expires_at")
+    if at_time < policy_created_at or at_time >= policy_expires_at:
+        raise ValueError("the business decision delivery policy is not active")
+    if at_time < task_created_at or at_time >= task_expires_at:
+        raise ValueError("the business decision task is not active")
+    if task_created_at < policy_created_at or task_expires_at > policy_expires_at:
+        raise ValueError("the business decision task exceeds the delivery policy")
+    if policy.delivery_mode is BusinessDecisionDeliveryMode.REMOTE_ANSWERABLE:
+        if not presentation.remote_safe:
+            raise ValueError(
+                "remote business decision presentation contains local-only text"
+            )
+        if presentation.egress_review_digests != {
+            policy.presentation_egress_review_digest
+        }:
+            raise ValueError(
+                "remote business decision presentation review binding does not match"
+            )
+
+    expected = {
+        "delivery_policy_digest": (task.delivery_policy_digest, policy.digest),
+        "presentation_ref": (task.presentation_ref, presentation.presentation_ref),
+        "presentation_digest": (task.presentation_digest, presentation.digest),
+        "policy.presentation_ref": (
+            policy.presentation_ref,
+            presentation.presentation_ref,
+        ),
+        "policy.presentation_digest": (
+            policy.presentation_digest,
+            presentation.digest,
+        ),
+        "decision_contract_digest": (
+            task.decision_contract_digest,
+            presentation.decision_contract_digest,
+        ),
+        "decision_contract_revision": (
+            task.decision_contract_revision,
+            presentation.decision_contract_revision,
+        ),
+        "policy.decision_contract_digest": (
+            policy.decision_contract_digest,
+            presentation.decision_contract_digest,
+        ),
+        "policy.decision_contract_revision": (
+            policy.decision_contract_revision,
+            presentation.decision_contract_revision,
+        ),
+        "authorized_role_refs": (
+            task.authorized_role_refs,
+            policy.authorized_role_refs,
+        ),
+        "authorized_route_refs": (
+            task.authorized_route_refs,
+            policy.authorized_route_refs,
+        ),
+        "authorized_answer_issuer_key_ids": (
+            task.authorized_answer_issuer_key_ids,
+            policy.authorized_answer_issuer_key_ids,
+        ),
+        "role_mapping_digest": (
+            task.role_mapping_digest,
+            policy.role_mapping_digest,
+        ),
+        "required_authn": (task.required_authn, policy.required_authn),
+        "delivery_mode": (task.delivery_mode, policy.delivery_mode),
+        "relay_capability_digest": (
+            task.relay_capability_digest,
+            policy.relay_capability_digest,
+        ),
+    }
+    for name, (actual, required) in expected.items():
+        if actual != required:
+            raise ValueError(f"business decision {name} does not match")
+
+    task_option_ids = tuple(option.option_id for option in task.options)
+    presentation_option_ids = tuple(option.option_id for option in presentation.options)
+    if task_option_ids != presentation_option_ids:
+        raise ValueError("business decision presentation options do not match the task")
+
+
+def business_decision_presentation_text_digest(text: str) -> str:
+    """Return a domain-separated digest for exact static presentation copy."""
+
+    if not isinstance(text, str):
+        raise TypeError("business decision presentation text must be a string")
+    if not 1 <= len(text) <= 500 or text.strip() != text:
+        raise ValueError(
+            "business decision presentation text must be trimmed and 1-500 characters"
+        )
+    if any(ord(character) < 32 or ord(character) == 127 for character in text):
+        raise ValueError(
+            "business decision presentation text contains a control character"
+        )
+    return "sha256:" + hashlib.sha256(
+        _PRESENTATION_TEXT_DOMAIN + text.encode("utf-8")
+    ).hexdigest()
 
 
 def sign_business_decision_task_hmac(
