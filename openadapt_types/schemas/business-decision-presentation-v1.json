@@ -1,0 +1,98 @@
+{
+  "$defs": {
+    "BusinessDecisionPresentationOptionV1": {
+      "additionalProperties": false,
+      "description": "One exact option label from the reviewed workflow contract.",
+      "properties": {
+        "label": {
+          "maxLength": 120,
+          "minLength": 1,
+          "pattern": "^[^\\x00-\\x1f\\x7f]{1,500}$",
+          "title": "Label",
+          "type": "string"
+        },
+        "option_id": {
+          "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$",
+          "title": "Option Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "option_id",
+        "label"
+      ],
+      "title": "BusinessDecisionPresentationOptionV1",
+      "type": "object"
+    }
+  },
+  "additionalProperties": false,
+  "description": "Reviewed static copy for one exact qualified business decision.\n\nThis artifact is separate from the Cloud-safe task because it contains\nhuman-readable text. The qualification path must review it before remote\nuse. The signed task carries only this artifact's digest and opaque ref.",
+  "properties": {
+    "decision_contract_digest": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "title": "Decision Contract Digest",
+      "type": "string"
+    },
+    "decision_contract_revision": {
+      "maximum": 2147483647,
+      "minimum": 1,
+      "title": "Decision Contract Revision",
+      "type": "integer"
+    },
+    "options": {
+      "items": {
+        "$ref": "#/$defs/BusinessDecisionPresentationOptionV1"
+      },
+      "maxItems": 32,
+      "minItems": 2,
+      "title": "Options",
+      "type": "array"
+    },
+    "presentation_ref": {
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9._:-]{7,127}$",
+      "title": "Presentation Ref",
+      "type": "string"
+    },
+    "presentation_revision": {
+      "maximum": 2147483647,
+      "minimum": 1,
+      "title": "Presentation Revision",
+      "type": "integer"
+    },
+    "question": {
+      "maxLength": 500,
+      "minLength": 1,
+      "pattern": "^[^\\x00-\\x1f\\x7f]{1,500}$",
+      "title": "Question",
+      "type": "string"
+    },
+    "review_contract_digest": {
+      "pattern": "^sha256:[0-9a-f]{64}$",
+      "title": "Review Contract Digest",
+      "type": "string"
+    },
+    "reviewed_safe_for_remote": {
+      "const": true,
+      "default": true,
+      "title": "Reviewed Safe For Remote",
+      "type": "boolean"
+    },
+    "schema_version": {
+      "const": "openadapt.business-decision-presentation/v1",
+      "default": "openadapt.business-decision-presentation/v1",
+      "title": "Schema Version",
+      "type": "string"
+    }
+  },
+  "required": [
+    "presentation_ref",
+    "presentation_revision",
+    "decision_contract_digest",
+    "decision_contract_revision",
+    "question",
+    "options",
+    "review_contract_digest"
+  ],
+  "title": "BusinessDecisionPresentationV1",
+  "type": "object"
+}
