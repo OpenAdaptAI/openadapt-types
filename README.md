@@ -1,9 +1,10 @@
 # openadapt-types
 
 > [!IMPORTANT]
-> **Status: Experimental. Interoperability schemas, not the product.** This
-> package publishes shared schemas for computer-use agents as an optional
-> component, with no production support promise.
+> **Lifecycle: Support.** `openadapt-types` is the current public schema
+> dependency for OpenAdapt components and partner integrations. Support
+> identifies its role in the stack. It does not create an additional OpenAdapt
+> product target or a separate Production claim.
 >
 > The OpenAdapt product is the demonstration compiler,
 > [`openadapt-flow`](https://github.com/OpenAdaptAI/openadapt-flow), installed
@@ -12,9 +13,9 @@
 > on Windows `cmd.exe` use `pip install "openadapt[browser]"`): it compiles a
 > demonstrated GUI workflow into a
 > deterministic, locally executable program. Healthy runs make no model calls,
-> and it halts instead of guessing when verification fails. Lifecycle labels for
-> every repository are in the
-> [repository lifecycle registry](https://github.com/OpenAdaptAI/.github/blob/main/REPOSITORY_LIFECYCLE.md).
+> and it halts instead of guessing when verification fails. The live admission
+> result for the seven OpenAdapt product targets is available from
+> [`openadapt.ai/status.json`](https://openadapt.ai/status.json).
 
 Canonical Pydantic schemas for computer-use agents.
 
@@ -34,24 +35,22 @@ OpenAdapt is a governed demonstration compiler: record a workflow once, compile
 the recording into a deterministic program, and replay that program with zero
 model calls on the healthy path. When the live screen does not match what was
 demonstrated it halts instead of guessing, using identity gates and independent
-effect verification. Every substrate is first-class.
+effect verification.
 
-Substrate maturity, stated the same way across the OpenAdapt repositories:
-
-| Substrate | Maturity |
-| --- | --- |
-| Browser (web) | Beta; available in production today through the managed browser product |
-| Native desktop (Windows, macOS, Linux) | Available for customer-controlled execution; qualification evidence is task- and environment-specific |
-| Remote display (RDP) | Available for customer-controlled execution; qualification evidence is task- and environment-specific |
-| Citrix / VDI | Available for customer-controlled execution; real-environment ICA/HDX qualification is deployment-specific |
+Schemas describe a stable interface. They do not assign a static maturity state
+to Browser, native desktop, RDP, or Citrix/VDI. Product status is derived from
+signed, expiring, and revocable release admissions for the exact seven product
+targets. A current product release can execute only an exact workflow version
+that has its own active admission for the bound application, environment,
+contracts, evidence authority, validity, and revocation state.
 
 The packages in the stack:
 
 | Package | Role |
 | --- | --- |
 | [`openadapt`](https://github.com/OpenAdaptAI/OpenAdapt) | Launcher and installer (`pip install openadapt`) |
-| [`openadapt-flow`](https://github.com/OpenAdaptAI/openadapt-flow) | Records, compiles, verifies, and replays workflows |
-| [`openadapt-capture`](https://github.com/OpenAdaptAI/openadapt-capture) | Cross-platform local desktop recording |
+| [`openadapt-flow`](https://github.com/OpenAdaptAI/openadapt-flow) | Normalizes demonstrations, then compiles, verifies, and replays workflows |
+| [`openadapt-capture`](https://github.com/OpenAdaptAI/openadapt-capture) | Canonical native screen, mouse, keyboard, timing, window, and media capture |
 | **`openadapt-types`** | Canonical action and UI-state schema (this package) |
 | [`openadapt-grounding`](https://github.com/OpenAdaptAI/openadapt-grounding) | Local OCR text-anchoring plus optional model grounding |
 | [`openadapt-privacy`](https://github.com/OpenAdaptAI/openadapt-privacy) | PHI/PII detection and redaction |

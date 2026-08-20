@@ -14,7 +14,6 @@ authors = [
 ]
 keywords = ["computer-use", "gui-automation", "schemas", "pydantic", "agents"]
 classifiers = [
-    "Development Status :: 3 - Alpha",
     "Intended Audience :: Developers",
     "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
@@ -57,7 +56,7 @@ allow_zero_version = true
 # existing editable lock entry without resolving dependencies, stage it in the
 # generated release commit, and build exactly those reviewed inputs. The PSR
 # action is a Docker action, so uv must be installed inside its container.
-build_command = "python -m pip install uv==0.11.29 && python scripts/verify_release_lock.py --write && git add uv.lock && uv build"
+build_command = "python -m pip install uv==0.11.29 && python scripts/verify_release_lock.py --write && git add uv.lock && uv build && python scripts/verify_release_artifacts.py"
 
 [tool.semantic_release.branches.main]
 match = "main"

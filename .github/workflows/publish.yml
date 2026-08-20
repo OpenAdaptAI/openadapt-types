@@ -37,7 +37,9 @@ jobs:
 
       - name: Verify the public distribution boundary
         if: steps.check_skip.outputs.skip != 'true' && steps.release.outputs.released == 'true'
-        run: python scripts/check_source_boundary.py --require-dist
+        run: |
+          python scripts/verify_release_artifacts.py
+          python scripts/check_source_boundary.py --require-dist
 
       # v1.14.0 bundles twine 6.1.0 and packaging 25.0, which reject the
       # Metadata-Version 2.5 that current hatchling emits. That pin failed the

@@ -67,11 +67,14 @@ def test_release_configuration_is_fail_closed() -> None:
     assert (
         "python -m pip install uv==0.11.29 && "
         "python scripts/verify_release_lock.py --write && "
-        "git add uv.lock && uv build"
+        "git add uv.lock && uv build && "
+        "python scripts/verify_release_artifacts.py"
     ) in metadata
     assert metadata.index("python -m pip install uv==0.11.29") < metadata.index(
         "python scripts/verify_release_lock.py --write"
-    ) < metadata.index("git add uv.lock") < metadata.index("uv build")
+    ) < metadata.index("git add uv.lock") < metadata.index("uv build") < metadata.index(
+        "python scripts/verify_release_artifacts.py"
+    )
     assert "run: uv build" not in workflow
     assert "astral-sh/setup-uv" not in workflow
     assert "actions/setup-python" not in workflow
@@ -80,6 +83,13 @@ def test_release_configuration_is_fail_closed() -> None:
     assert 'version: "0.11.29"' in test_workflow
     assert 'python-version: "3.12"' in test_workflow
     assert "uv sync --locked --extra dev" in test_workflow
+    assert "python scripts/verify_release_artifacts.py" in test_workflow
+    assert "python scripts/verify_release_artifacts.py" in workflow
+
+
+def test_project_has_no_static_maturity_classifier() -> None:
+    metadata = (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    assert "Development Status ::" not in metadata
 
 
 def test_all_third_party_actions_are_commit_pinned() -> None:
