@@ -10,7 +10,10 @@ import zipfile
 from email.message import Message
 from pathlib import Path
 
-import tomllib
+try:
+    import tomllib
+except ModuleNotFoundError:  # pragma: no cover - exercised by supported Python 3.10
+    import tomli as tomllib
 
 ROOT = Path(__file__).resolve().parents[1]
 

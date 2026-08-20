@@ -37,6 +37,7 @@ Issues = "https://github.com/OpenAdaptAI/openadapt-types/issues"
 dev = [
     "pytest>=7.0",
     "pytest-cov",
+    "tomli>=2.0.0; python_version < '3.11'",
 ]
 
 
