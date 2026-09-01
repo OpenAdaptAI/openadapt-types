@@ -11,19 +11,33 @@ from pydantic import ValidationError
 from openadapt_types import (
     AUTHORING_BIND_SCHEMA,
     AUTHORING_COMMAND_SCHEMA,
+    AUTHORING_MAX_COMMAND_BYTES,
+    AUTHORING_MAX_OBSERVE_BYTES,
     AUTHORING_OBSERVE_SCHEMA,
+    OBSERVE_SCHEMA_VERSION,
+    AuthoringAllowStateV1,
     AuthoringBindClaimV1,
     AuthoringBindMintV1,
+    AuthoringBindPackResultV1,
     AuthoringBindV1,
+    AuthoringCallbackV1,
     AuthoringClickArgsV1,
+    AuthoringCommandLookupArgsV1,
     AuthoringCommandLookupV1,
     AuthoringCommandV1,
     AuthoringCompileResultV1,
     AuthoringEnqueueAcceptedV1,
     AuthoringErrorResultV1,
+    AuthoringGetCoachResultV1,
+    AuthoringHaltResultV1,
+    AuthoringHostedClickArgsV1,
+    AuthoringHostedPackArgsV1,
+    AuthoringInFlightV1,
     AuthoringNormalizedBoundsV1,
+    AuthoringNotBoundV1,
     AuthoringObserveV1,
     AuthoringPauseResultV1,
+    AuthoringPollRequestV1,
     ComputerState,
     ElementRole,
     UINode,
@@ -51,6 +65,7 @@ FORBIDDEN_FIELDS = {
     "screenshot": "data:image/png;base64,secret",
     "text": "typed note",
     "backend_pixels": {"x": 920, "y": 640, "w": 180, "h": 36},
+    "provider_runtime_id": "ax-elem-secret",
 }
 
 
@@ -170,15 +185,16 @@ def test_observe_refuses_unknown_keys() -> None:
 def test_observe_refuses_six_digit_and_at_sign_labels() -> None:
     payload = _observe_payload()
     node = dict(payload["tree"][0])  # type: ignore[index]
-    node["name"] = "acct 009321"
-    with pytest.raises(ValidationError):
-        AuthoringObserveV1.model_validate({**payload, "tree": [node]})
-    node["name"] = "user@example.com"
-    with pytest.raises(ValidationError):
-        AuthoringObserveV1.model_validate({**payload, "tree": [node]})
-    node["name"] = "https://example"
-    with pytest.raises(ValidationError):
-        AuthoringObserveV1.model_validate({**payload, "tree": [node]})
+    for name in (
+        "acct 009321",
+        "user@example.com",
+        "https://example",
+        "123-45-6789",
+        "555-123-4567",
+    ):
+        node["name"] = name
+        with pytest.raises(ValidationError):
+            AuthoringObserveV1.model_validate({**payload, "tree": [node]})
 
 
 def test_citrix_observe_is_coach_only_with_empty_tree() -> None:
@@ -348,25 +364,38 @@ def test_bind_status_has_no_secrets_or_tree() -> None:
         {
             "pack_id": VALID_PACK,
             "bound": True,
-            "allowed": True,
+            "allow": "granted",
             "client_display": "ChatGPT",
             "backend": "web",
             "coach_only": False,
+            "halted": False,
         }
     )
     assert status.schema_version == AUTHORING_BIND_SCHEMA
+    assert status.allow is AuthoringAllowStateV1.GRANTED
     dumped = status.model_dump()
     assert "bind" not in dumped
     assert "leaseSecret" not in dumped
     assert "tree" not in dumped
     assert "args" not in dumped
+    pending = AuthoringBindV1.model_validate(
+        {
+            "pack_id": VALID_PACK,
+            "bound": True,
+            "allow": "pending",
+            "backend": "web",
+            "coach_only": False,
+        }
+    )
+    assert pending.allow is AuthoringAllowStateV1.PENDING
+    assert pending.client_display is None
     for field, value in FORBIDDEN_FIELDS.items():
         with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
             AuthoringBindV1.model_validate(
                 {
                     "pack_id": VALID_PACK,
                     "bound": False,
-                    "allowed": False,
+                    "allow": "none",
                     "coach_only": True,
                     field: value,
                 }
@@ -454,9 +483,195 @@ def test_packaged_authoring_schemas_are_strict(
     assert schema["additionalProperties"] is False
     encoded = json.dumps(schema)
     assert "openadapt.authoring" in encoded
+    if filename == "authoring-observe-v1.json":
+        assert schema["x-openadapt-max-bytes"] == AUTHORING_MAX_OBSERVE_BYTES
+        assert schema["x-openadapt-max-nodes"] == 200
+    if filename == "authoring-command-v1.json":
+        assert schema["x-openadapt-max-enqueue-bytes"] == AUTHORING_MAX_COMMAND_BYTES
     properties = schema.get("properties", {})
     for forbidden in ("value", "title", "screenshot", "text", "backend_pixels"):
         assert forbidden not in properties
     assert _unconstrained_string_paths(schema) == []
     packaged = files("openadapt_types.schemas").joinpath(filename)
     assert json.loads(packaged.read_text(encoding="utf-8")) == schema
+
+
+def test_schema_version_alias_matches_observe_contract() -> None:
+    assert OBSERVE_SCHEMA_VERSION == AUTHORING_OBSERVE_SCHEMA
+    assert OBSERVE_SCHEMA_VERSION == "openadapt.authoring.observe/v1"
+
+
+def test_linux_unique_title_may_agent_drive() -> None:
+    observe = AuthoringObserveV1.model_validate(
+        _observe_payload(backend="linux", provider="linux_atspi")
+    )
+    assert observe.agent_drive is True
+    assert observe.coach_only is False
+
+
+def test_empty_projection_is_empty_tree_never_raw() -> None:
+    observe = AuthoringObserveV1.model_validate(
+        {
+            "backend": "web",
+            "provider": "playwright_ax",
+            "agent_drive": False,
+            "coach_only": True,
+            "recording": False,
+            "tree": [],
+            "truncated": False,
+            "node_count": 0,
+            "reason": "empty_projection",
+        }
+    )
+    dumped = observe.model_dump()
+    assert dumped["tree"] == ()
+    assert "raw" not in dumped
+    with pytest.raises(ValidationError):
+        AuthoringObserveV1.model_validate(
+            {
+                **_observe_payload(),
+                "reason": "empty_projection",
+            }
+        )
+
+
+def test_observe_refuses_payloads_over_32kib() -> None:
+    payload = _observe_payload(value="x" * AUTHORING_MAX_OBSERVE_BYTES)
+    with pytest.raises(ValidationError, match="32"):
+        AuthoringObserveV1.model_validate(payload)
+
+
+def test_get_coach_result_is_hint_only() -> None:
+    command = AuthoringCommandV1.model_validate(
+        _command_payload(
+            tool="get_coach",
+            args={},
+            status="done",
+            result={"hint": "Click Continue"},
+        )
+    )
+    assert isinstance(command.result, AuthoringGetCoachResultV1)
+    assert command.result.hint == "Click Continue"
+    empty = AuthoringCommandV1.model_validate(
+        _command_payload(
+            tool="get_coach",
+            args={},
+            status="done",
+            result={"hint": None},
+        )
+    )
+    assert empty.result is not None and empty.result.hint is None
+    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+        AuthoringGetCoachResultV1.model_validate({"hint": "Click Continue", "value": "ssn"})
+
+
+def test_bind_pack_args_and_result_are_pack_and_allow_only() -> None:
+    command = AuthoringCommandV1.model_validate(
+        _command_payload(
+            tool="bind_pack",
+            args={"pack_id": VALID_PACK},
+            status="done",
+            result={"allowed": True, "client_display": "ChatGPT"},
+        )
+    )
+    assert isinstance(command.result, AuthoringBindPackResultV1)
+    assert command.result.allowed is True
+    with pytest.raises(ValidationError):
+        AuthoringCommandV1.model_validate(
+            _command_payload(
+                tool="bind_pack",
+                args={"pack_id": "p.otherpackid1"},
+                status="pending",
+            )
+        )
+    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+        AuthoringBindPackResultV1.model_validate(
+            {"allowed": True, "client_display": "ChatGPT", "sub": VALID_SUB}
+        )
+
+
+def test_halt_and_recording_acks_are_closed() -> None:
+    halt = AuthoringCommandV1.model_validate(
+        _command_payload(tool="halt", args={}, status="done", result={"halted": True})
+    )
+    assert isinstance(halt.result, AuthoringHaltResultV1)
+    started = AuthoringCommandV1.model_validate(
+        _command_payload(
+            tool="start_record",
+            args={},
+            status="done",
+            result={"recording": True},
+        )
+    )
+    assert started.result is not None and started.result.recording is True
+    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+        AuthoringHaltResultV1.model_validate({"halted": True, "screenshot": "x"})
+
+
+def test_hosted_click_args_are_pack_and_node_id() -> None:
+    args = AuthoringHostedClickArgsV1.model_validate(
+        {"pack_id": VALID_PACK, "node_id": VALID_NODE}
+    )
+    assert args.node_id == VALID_NODE
+    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+        AuthoringHostedClickArgsV1.model_validate(
+            {"pack_id": VALID_PACK, "node_id": VALID_NODE, "x": 12, "y": 40}
+        )
+    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+        AuthoringHostedClickArgsV1.model_validate(
+            {"pack_id": VALID_PACK, "node_id": VALID_NODE, "value": "typed"}
+        )
+    pack = AuthoringHostedPackArgsV1.model_validate({"pack_id": VALID_PACK})
+    assert pack.pack_id == VALID_PACK
+    lookup = AuthoringCommandLookupArgsV1.model_validate({"command_id": VALID_COMMAND_ID})
+    assert lookup.command_id == VALID_COMMAND_ID
+
+
+def test_enqueue_not_bound_and_in_flight_are_closed() -> None:
+    unbound = AuthoringNotBoundV1.model_validate({"status": "not_bound"})
+    assert unbound.status == "not_bound"
+    busy = AuthoringInFlightV1.model_validate(
+        {"error": "in_flight", "command_id": VALID_COMMAND_ID}
+    )
+    assert busy.command_id == VALID_COMMAND_ID
+    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+        AuthoringNotBoundV1.model_validate({"status": "not_bound", "tree": []})
+    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+        AuthoringInFlightV1.model_validate(
+            {"error": "in_flight", "command_id": VALID_COMMAND_ID, "title": "x"}
+        )
+
+
+def test_poll_is_wait_zero_and_callback_is_phi_free() -> None:
+    poll = AuthoringPollRequestV1.model_validate(
+        {"wait_seconds": 0, "lease_seconds": 900}
+    )
+    assert poll.wait_seconds == 0
+    with pytest.raises(ValidationError):
+        AuthoringPollRequestV1.model_validate({"wait_seconds": 25, "lease_seconds": 900})
+    callback = AuthoringCallbackV1.model_validate(
+        {
+            "command_id": VALID_COMMAND_ID,
+            "status": "done",
+            "result": {"recorded": True, "param": "note"},
+        }
+    )
+    assert callback.result is not None
+    halt = AuthoringCallbackV1.model_validate({"halted": True})
+    assert halt.halted is True
+    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+        AuthoringCallbackV1.model_validate(
+            {
+                "command_id": VALID_COMMAND_ID,
+                "status": "done",
+                "result": {"recorded": True, "param": "note"},
+                "screenshot": "x",
+            }
+        )
+
+
+def test_command_enqueue_without_result_is_capped_at_8kib() -> None:
+    payload = _command_payload()
+    payload["value"] = "x" * AUTHORING_MAX_COMMAND_BYTES
+    with pytest.raises(ValidationError, match="8"):
+        AuthoringCommandV1.model_validate(payload)

@@ -12,6 +12,7 @@ Capture. This module only refuses those keys on the wire.
 
 from __future__ import annotations
 
+import json
 import re
 from enum import Enum
 from math import isfinite
@@ -40,12 +41,17 @@ AUTHORING_COMMAND_SCHEMA: Literal["openadapt.authoring.command/v1"] = (
 AUTHORING_BIND_SCHEMA: Literal["openadapt.authoring.bind/v1"] = (
     "openadapt.authoring.bind/v1"
 )
+OBSERVE_SCHEMA_VERSION = AUTHORING_OBSERVE_SCHEMA
+COMMAND_SCHEMA_VERSION = AUTHORING_COMMAND_SCHEMA
+BIND_SCHEMA_VERSION = AUTHORING_BIND_SCHEMA
 
 AUTHORING_ORIGIN = "https://openadapt.ai"
 AUTHORING_RUNNER_SCHEME = "openadapt"
 AUTHORING_RUNNER_ACTION = "runner"
 AUTHORING_MAX_URI_BYTES = 2048
 AUTHORING_MAX_NODES = 200
+AUTHORING_MAX_OBSERVE_BYTES = 32 * 1024
+AUTHORING_MAX_COMMAND_BYTES = 8 * 1024
 AUTHORING_LEASE_S = 900
 AUTHORING_RETRY_AFTER_MS = 1000
 
@@ -73,6 +79,11 @@ _PROCESS_NAME_PATTERN = r"^[A-Za-z0-9 ._-]{1,64}$"
 _PROJECTED_LABEL_PATTERN = r"^[A-Za-z0-9][A-Za-z0-9 ._-]{0,79}$"
 _PARAM_NAME_PATTERN = r"^[a-z][a-z0-9_]{0,31}$"
 _SIX_DIGITS_RE = re.compile(r"\d{6}")
+_SSN_RE = re.compile(r"(?<!\d)\d{3}-\d{2}-\d{4}(?!\d)")
+_PHONE_RE = re.compile(
+    r"(?<!\d)(?:\+?1[-.\s]?)?(?:\(?\d{3}\)?[-.\s]?)\d{3}[-.\s]?\d{4}(?!\d)"
+)
+_EMAIL_RE = re.compile(r"[^@\s]+@[^@\s]+\.[A-Za-z]{2,}")
 _SHA256_HEX_PATTERN = r"^[a-f0-9]{64}$"
 _TIMESTAMP_PATTERN = r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(Z|[+-]\d{2}:\d{2})$"
 _RUNNER_FIELDS = frozenset({"pack", "bind", "origin"})
@@ -110,6 +121,12 @@ class AuthoringClientDisplayV1(str, Enum):
     CLAUDE = "Claude"
 
 
+class AuthoringAllowStateV1(str, Enum):
+    NONE = "none"
+    PENDING = "pending"
+    GRANTED = "granted"
+
+
 class AuthoringEnqueueToolV1(str, Enum):
     OBSERVE = "observe"
     START_RECORD = "start_record"
@@ -137,8 +154,14 @@ class AuthoringErrorCodeV1(str, Enum):
     IN_FLIGHT = "in_flight"
     COACH_ONLY = "COACH_ONLY"
     NOT_BOUND = "not_bound"
+    NOT_ALLOWED = "not_allowed"
     RECONCILIATION_REQUIRED = "RECONCILIATION_REQUIRED"
     MISSING_SECRET_TYPE = "missing_secret_type"
+    UNKNOWN_COMMAND = "unknown_command"
+    UNKNOWN_PACK = "unknown_pack"
+    UNKNOWN_TOOL = "unknown_tool"
+    DENIED = "denied"
+    HALTED = "halted"
 
 
 class AuthoringTokenError(ValueError):
@@ -250,9 +273,26 @@ def parse_authoring_runner_uri(uri: object) -> AuthoringRunnerUriV1:
 def _projected_label(value: object) -> str:
     if not isinstance(value, str) or not re.fullmatch(_PROJECTED_LABEL_PATTERN, value):
         raise ValueError("projected label is not allowed on the authoring wire")
-    if _SIX_DIGITS_RE.search(value):
+    if (
+        _SIX_DIGITS_RE.search(value)
+        or _SSN_RE.search(value)
+        or _PHONE_RE.search(value)
+        or _EMAIL_RE.search(value)
+        or "://" in value
+        or "@" in value
+    ):
         raise ValueError("projected label is not allowed on the authoring wire")
     return value
+
+
+def _utf8_bytes(value: object) -> int:
+    return len(json.dumps(value, separators=(",", ":")).encode("utf-8"))
+
+
+def _reject_oversize(data: Any, limit: int, label: str) -> Any:
+    if isinstance(data, dict) and _utf8_bytes(data) > limit:
+        raise ValueError(f"{label} exceeds {limit} bytes")
+    return data
 
 
 def _finite_unit(value: object) -> float:
@@ -314,6 +354,15 @@ class AuthoringNodeV1(_StrictContract):
 class AuthoringObserveV1(_StrictContract):
     """PHI-safe projected tree. No screenshots, titles, or field values."""
 
+    model_config = ConfigDict(
+        extra="forbid",
+        frozen=True,
+        json_schema_extra={
+            "x-openadapt-max-bytes": AUTHORING_MAX_OBSERVE_BYTES,
+            "x-openadapt-max-nodes": AUTHORING_MAX_NODES,
+        },
+    )
+
     schema_version: Literal["openadapt.authoring.observe/v1"] = AUTHORING_OBSERVE_SCHEMA
     backend: AuthoringBackendV1
     provider: AuthoringProviderV1
@@ -326,6 +375,11 @@ class AuthoringObserveV1(_StrictContract):
     truncated: StrictBool
     node_count: StrictInt = Field(ge=0, le=AUTHORING_MAX_NODES)
     reason: AuthoringEmptyProjectionReason | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def _cap_wire_bytes(cls, data: Any) -> Any:
+        return _reject_oversize(data, AUTHORING_MAX_OBSERVE_BYTES, "observe")
 
     @model_validator(mode="after")
     def _consistent_projection(self) -> "AuthoringObserveV1":
@@ -364,6 +418,43 @@ class AuthoringSetCoachArgsV1(_StrictContract):
         return _projected_label(value)
 
 
+class AuthoringBindPackArgsV1(_StrictContract):
+    pack_id: StrictStr = Field(pattern=_PACK_ID_PATTERN)
+
+
+class AuthoringHostedPackArgsV1(_StrictContract):
+    """Hosted MCP arguments for tools that only take a pack id."""
+
+    pack_id: StrictStr = Field(pattern=_PACK_ID_PATTERN)
+
+
+class AuthoringHostedClickArgsV1(_StrictContract):
+    """Hosted ``click`` arguments. ``node_id`` only; never pixels or a value."""
+
+    pack_id: StrictStr = Field(pattern=_PACK_ID_PATTERN)
+    node_id: StrictStr = Field(pattern=_NODE_ID_PATTERN)
+
+
+class AuthoringHostedPauseArgsV1(_StrictContract):
+    pack_id: StrictStr = Field(pattern=_PACK_ID_PATTERN)
+    param: StrictStr | None = Field(default=None, pattern=_PARAM_NAME_PATTERN)
+    secret: StrictBool | None = None
+
+
+class AuthoringHostedSetCoachArgsV1(_StrictContract):
+    pack_id: StrictStr = Field(pattern=_PACK_ID_PATTERN)
+    hint: StrictStr = Field(pattern=_PROJECTED_LABEL_PATTERN)
+
+    @field_validator("hint")
+    @classmethod
+    def _hint(cls, value: str) -> str:
+        return _projected_label(value)
+
+
+class AuthoringCommandLookupArgsV1(_StrictContract):
+    command_id: StrictStr = Field(pattern=_COMMAND_ID_PATTERN)
+
+
 class AuthoringCompileResultV1(_StrictContract):
     status: Literal["needs_human_admit"] = "needs_human_admit"
     workflow_id: StrictStr = Field(pattern=_WORKFLOW_ID_PATTERN)
@@ -373,6 +464,44 @@ class AuthoringCompileResultV1(_StrictContract):
 class AuthoringPauseResultV1(_StrictContract):
     recorded: StrictBool
     param: StrictStr = Field(pattern=_PARAM_NAME_PATTERN)
+
+
+class AuthoringRecordingResultV1(_StrictContract):
+    recording: StrictBool
+
+
+class AuthoringClickResultV1(_StrictContract):
+    clicked: Literal[True] = True
+
+
+class AuthoringHaltResultV1(_StrictContract):
+    halted: Literal[True] = True
+
+
+class AuthoringSetCoachResultV1(_StrictContract):
+    ok: StrictBool
+
+
+class AuthoringGetCoachResultV1(_StrictContract):
+    hint: StrictStr | None = Field(default=None, pattern=_PROJECTED_LABEL_PATTERN)
+
+    @field_validator("hint")
+    @classmethod
+    def _hint(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return _projected_label(value)
+
+
+class AuthoringBindPackResultV1(_StrictContract):
+    allowed: StrictBool
+    client_display: AuthoringClientDisplayV1 | None = None
+
+    @model_validator(mode="after")
+    def _display_after_allow(self) -> "AuthoringBindPackResultV1":
+        if self.client_display is not None and not self.allowed:
+            raise ValueError("client_display is only present after Allow")
+        return self
 
 
 class AuthoringErrorResultV1(_StrictContract):
@@ -385,22 +514,62 @@ class AuthoringEnqueueAcceptedV1(_StrictContract):
     command_id: StrictStr = Field(pattern=_COMMAND_ID_PATTERN)
 
 
+class AuthoringNotBoundV1(_StrictContract):
+    status: Literal["not_bound"] = "not_bound"
+
+
+class AuthoringInFlightV1(_StrictContract):
+    error: Literal["in_flight"] = "in_flight"
+    command_id: StrictStr = Field(pattern=_COMMAND_ID_PATTERN)
+
+
 _ARGS_BY_TOOL: dict[AuthoringEnqueueToolV1, type[_StrictContract]] = {
     AuthoringEnqueueToolV1.CLICK: AuthoringClickArgsV1,
     AuthoringEnqueueToolV1.PAUSE_FOR_INPUT: AuthoringPauseArgsV1,
     AuthoringEnqueueToolV1.SET_COACH: AuthoringSetCoachArgsV1,
+    AuthoringEnqueueToolV1.BIND_PACK: AuthoringBindPackArgsV1,
 }
+
+_RESULT_BY_TOOL: dict[AuthoringEnqueueToolV1, type[_StrictContract]] = {
+    AuthoringEnqueueToolV1.OBSERVE: AuthoringObserveV1,
+    AuthoringEnqueueToolV1.COMPILE: AuthoringCompileResultV1,
+    AuthoringEnqueueToolV1.PAUSE_FOR_INPUT: AuthoringPauseResultV1,
+    AuthoringEnqueueToolV1.GET_COACH: AuthoringGetCoachResultV1,
+    AuthoringEnqueueToolV1.BIND_PACK: AuthoringBindPackResultV1,
+    AuthoringEnqueueToolV1.START_RECORD: AuthoringRecordingResultV1,
+    AuthoringEnqueueToolV1.STOP_RECORD: AuthoringRecordingResultV1,
+    AuthoringEnqueueToolV1.CLICK: AuthoringClickResultV1,
+    AuthoringEnqueueToolV1.HALT: AuthoringHaltResultV1,
+    AuthoringEnqueueToolV1.SET_COACH: AuthoringSetCoachResultV1,
+}
+
+_OPTIONAL_RESULT_TOOLS = frozenset(
+    {
+        AuthoringEnqueueToolV1.START_RECORD,
+        AuthoringEnqueueToolV1.STOP_RECORD,
+        AuthoringEnqueueToolV1.CLICK,
+        AuthoringEnqueueToolV1.HALT,
+        AuthoringEnqueueToolV1.SET_COACH,
+    }
+)
 
 AuthoringCommandArgsV1 = (
     AuthoringClickArgsV1
     | AuthoringPauseArgsV1
     | AuthoringSetCoachArgsV1
+    | AuthoringBindPackArgsV1
     | AuthoringEmptyArgsV1
 )
 AuthoringCommandResultV1 = (
     AuthoringObserveV1
     | AuthoringCompileResultV1
     | AuthoringPauseResultV1
+    | AuthoringGetCoachResultV1
+    | AuthoringBindPackResultV1
+    | AuthoringRecordingResultV1
+    | AuthoringClickResultV1
+    | AuthoringHaltResultV1
+    | AuthoringSetCoachResultV1
     | AuthoringErrorResultV1
 )
 
@@ -415,6 +584,14 @@ def _parse_args(tool: AuthoringEnqueueToolV1, args: object) -> AuthoringCommandA
 
 class AuthoringCommandV1(_StrictContract):
     """Mailbox envelope. Result is PHI-free; args never carry typed values."""
+
+    model_config = ConfigDict(
+        extra="forbid",
+        frozen=True,
+        json_schema_extra={
+            "x-openadapt-max-enqueue-bytes": AUTHORING_MAX_COMMAND_BYTES,
+        },
+    )
 
     schema_version: Literal["openadapt.authoring.command/v1"] = AUTHORING_COMMAND_SCHEMA
     command_id: StrictStr = Field(pattern=_COMMAND_ID_PATTERN)
@@ -431,6 +608,10 @@ class AuthoringCommandV1(_StrictContract):
     @model_validator(mode="before")
     @classmethod
     def _typed_args(cls, data: Any) -> Any:
+        if isinstance(data, dict):
+            enqueue = dict(data)
+            enqueue.pop("result", None)
+            _reject_oversize(enqueue, AUTHORING_MAX_COMMAND_BYTES, "command envelope")
         if not isinstance(data, dict):
             return data
         tool = data.get("tool")
@@ -447,6 +628,11 @@ class AuthoringCommandV1(_StrictContract):
         expected_args = type(_parse_args(self.tool, self.args.model_dump(mode="json")))
         if type(self.args) is not expected_args:
             raise ValueError("command args do not match tool")
+        if (
+            isinstance(self.args, AuthoringBindPackArgsV1)
+            and self.args.pack_id != self.pack_id
+        ):
+            raise ValueError("bind_pack args pack_id must match the envelope")
         if self.expires_at <= self.enqueued_at:
             raise ValueError("expires_at must be after enqueued_at")
         if self.status is AuthoringCommandStatusV1.ERROR:
@@ -457,17 +643,17 @@ class AuthoringCommandV1(_StrictContract):
             if self.result is not None:
                 raise ValueError("only done or error commands may carry a result")
             return self
-        if self.tool is AuthoringEnqueueToolV1.OBSERVE:
-            if not isinstance(self.result, AuthoringObserveV1):
-                raise ValueError("observe result must be authoring observe/v1")
-        elif self.tool is AuthoringEnqueueToolV1.COMPILE:
-            if not isinstance(self.result, AuthoringCompileResultV1):
-                raise ValueError("compile result must be needs_human_admit")
-        elif self.tool is AuthoringEnqueueToolV1.PAUSE_FOR_INPUT:
-            if not isinstance(self.result, AuthoringPauseResultV1):
-                raise ValueError("pause result carries param name only")
-        elif self.result is not None:
-            raise ValueError("this tool has no result payload")
+        expected_result = _RESULT_BY_TOOL.get(self.tool)
+        if expected_result is None:
+            if self.result is not None:
+                raise ValueError("this tool has no result payload")
+            return self
+        if self.result is None:
+            if self.tool in _OPTIONAL_RESULT_TOOLS:
+                return self
+            raise ValueError("this tool requires a PHI-free result")
+        if not isinstance(self.result, expected_result):
+            raise ValueError("command result does not match tool")
         return self
 
 
@@ -560,17 +746,45 @@ class AuthoringBindV1(_StrictContract):
     schema_version: Literal["openadapt.authoring.bind/v1"] = AUTHORING_BIND_SCHEMA
     pack_id: StrictStr = Field(pattern=_PACK_ID_PATTERN)
     bound: StrictBool
-    allowed: StrictBool
+    allow: AuthoringAllowStateV1
     client_display: AuthoringClientDisplayV1 | None = None
     backend: AuthoringBackendV1 | None = None
     coach_only: StrictBool
+    halted: StrictBool = False
 
     @model_validator(mode="after")
     def _status_shape(self) -> "AuthoringBindV1":
-        if not self.bound and self.allowed:
+        granted = self.allow is AuthoringAllowStateV1.GRANTED
+        if not self.bound and self.allow is not AuthoringAllowStateV1.NONE:
             raise ValueError("an unbound laptop cannot be allowed")
-        if self.client_display is not None and not self.allowed:
+        if self.allow is AuthoringAllowStateV1.PENDING and not self.bound:
+            raise ValueError("pending allow requires a bound laptop")
+        if self.client_display is not None and not granted:
             raise ValueError("client_display is only present after Allow")
         if self.backend is not None and not self.bound:
             raise ValueError("backend is only present on a bound laptop")
+        if not self.bound and not self.coach_only:
+            raise ValueError("an unbound laptop is coach_only")
+        return self
+
+
+class AuthoringPollRequestV1(_StrictContract):
+    wait_seconds: Literal[0] = 0
+    lease_seconds: Literal[900] = AUTHORING_LEASE_S
+
+
+class AuthoringCallbackV1(_StrictContract):
+    """Desktop mailbox callback. PHI-free result only."""
+
+    command_id: StrictStr | None = Field(default=None, pattern=_COMMAND_ID_PATTERN)
+    status: AuthoringCommandStatusV1 | None = None
+    result: AuthoringCommandResultV1 | None = None
+    halted: StrictBool | None = None
+
+    @model_validator(mode="after")
+    def _callback_shape(self) -> "AuthoringCallbackV1":
+        if self.halted is True and self.command_id is None:
+            return self
+        if self.command_id is None:
+            raise ValueError("callback requires command_id unless it is unsigned halt")
         return self

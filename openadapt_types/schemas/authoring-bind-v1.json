@@ -1,5 +1,14 @@
 {
   "$defs": {
+    "AuthoringAllowStateV1": {
+      "enum": [
+        "none",
+        "pending",
+        "granted"
+      ],
+      "title": "AuthoringAllowStateV1",
+      "type": "string"
+    },
     "AuthoringBackendV1": {
       "enum": [
         "macos",
@@ -24,9 +33,8 @@
   "additionalProperties": false,
   "description": "``bind_status`` body. No token, lease secret, tree, hint, or command args.",
   "properties": {
-    "allowed": {
-      "title": "Allowed",
-      "type": "boolean"
+    "allow": {
+      "$ref": "#/$defs/AuthoringAllowStateV1"
     },
     "backend": {
       "anyOf": [
@@ -58,6 +66,11 @@
       "title": "Coach Only",
       "type": "boolean"
     },
+    "halted": {
+      "default": false,
+      "title": "Halted",
+      "type": "boolean"
+    },
     "pack_id": {
       "pattern": "^(p\\.[A-Za-z0-9_-]{12}|v1\\.[A-Za-z0-9_-]{38,512})$",
       "title": "Pack Id",
@@ -73,7 +86,7 @@
   "required": [
     "pack_id",
     "bound",
-    "allowed",
+    "allow",
     "coach_only"
   ],
   "title": "AuthoringBindV1",

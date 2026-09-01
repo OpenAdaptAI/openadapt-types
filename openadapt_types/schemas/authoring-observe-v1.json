@@ -298,5 +298,7 @@
     "node_count"
   ],
   "title": "AuthoringObserveV1",
-  "type": "object"
+  "type": "object",
+  "x-openadapt-max-bytes": 32768,
+  "x-openadapt-max-nodes": 200
 }

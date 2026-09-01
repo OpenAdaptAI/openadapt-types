@@ -12,6 +12,46 @@
       "title": "AuthoringBackendV1",
       "type": "string"
     },
+    "AuthoringBindPackArgsV1": {
+      "additionalProperties": false,
+      "properties": {
+        "pack_id": {
+          "pattern": "^(p\\.[A-Za-z0-9_-]{12}|v1\\.[A-Za-z0-9_-]{38,512})$",
+          "title": "Pack Id",
+          "type": "string"
+        }
+      },
+      "required": [
+        "pack_id"
+      ],
+      "title": "AuthoringBindPackArgsV1",
+      "type": "object"
+    },
+    "AuthoringBindPackResultV1": {
+      "additionalProperties": false,
+      "properties": {
+        "allowed": {
+          "title": "Allowed",
+          "type": "boolean"
+        },
+        "client_display": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/AuthoringClientDisplayV1"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "allowed"
+      ],
+      "title": "AuthoringBindPackResultV1",
+      "type": "object"
+    },
     "AuthoringClickArgsV1": {
       "additionalProperties": false,
       "properties": {
@@ -26,6 +66,27 @@
       ],
       "title": "AuthoringClickArgsV1",
       "type": "object"
+    },
+    "AuthoringClickResultV1": {
+      "additionalProperties": false,
+      "properties": {
+        "clicked": {
+          "const": true,
+          "default": true,
+          "title": "Clicked",
+          "type": "boolean"
+        }
+      },
+      "title": "AuthoringClickResultV1",
+      "type": "object"
+    },
+    "AuthoringClientDisplayV1": {
+      "enum": [
+        "ChatGPT",
+        "Claude"
+      ],
+      "title": "AuthoringClientDisplayV1",
+      "type": "string"
     },
     "AuthoringCommandStatusV1": {
       "enum": [
@@ -100,8 +161,14 @@
         "in_flight",
         "COACH_ONLY",
         "not_bound",
+        "not_allowed",
         "RECONCILIATION_REQUIRED",
-        "missing_secret_type"
+        "missing_secret_type",
+        "unknown_command",
+        "unknown_pack",
+        "unknown_tool",
+        "denied",
+        "halted"
       ],
       "title": "AuthoringErrorCodeV1",
       "type": "string"
@@ -130,6 +197,39 @@
         "error"
       ],
       "title": "AuthoringErrorResultV1",
+      "type": "object"
+    },
+    "AuthoringGetCoachResultV1": {
+      "additionalProperties": false,
+      "properties": {
+        "hint": {
+          "anyOf": [
+            {
+              "pattern": "^[A-Za-z0-9][A-Za-z0-9 ._-]{0,79}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Hint"
+        }
+      },
+      "title": "AuthoringGetCoachResultV1",
+      "type": "object"
+    },
+    "AuthoringHaltResultV1": {
+      "additionalProperties": false,
+      "properties": {
+        "halted": {
+          "const": true,
+          "default": true,
+          "title": "Halted",
+          "type": "boolean"
+        }
+      },
+      "title": "AuthoringHaltResultV1",
       "type": "object"
     },
     "AuthoringNodeV1": {
@@ -341,7 +441,9 @@
         "node_count"
       ],
       "title": "AuthoringObserveV1",
-      "type": "object"
+      "type": "object",
+      "x-openadapt-max-bytes": 32768,
+      "x-openadapt-max-nodes": 200
     },
     "AuthoringPauseArgsV1": {
       "additionalProperties": false,
@@ -406,6 +508,20 @@
       "title": "AuthoringProviderV1",
       "type": "string"
     },
+    "AuthoringRecordingResultV1": {
+      "additionalProperties": false,
+      "properties": {
+        "recording": {
+          "title": "Recording",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "recording"
+      ],
+      "title": "AuthoringRecordingResultV1",
+      "type": "object"
+    },
     "AuthoringSetCoachArgsV1": {
       "additionalProperties": false,
       "properties": {
@@ -419,6 +535,20 @@
         "hint"
       ],
       "title": "AuthoringSetCoachArgsV1",
+      "type": "object"
+    },
+    "AuthoringSetCoachResultV1": {
+      "additionalProperties": false,
+      "properties": {
+        "ok": {
+          "title": "Ok",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "ok"
+      ],
+      "title": "AuthoringSetCoachResultV1",
       "type": "object"
     },
     "AuthoringWindowV1": {
@@ -496,6 +626,9 @@
           "$ref": "#/$defs/AuthoringSetCoachArgsV1"
         },
         {
+          "$ref": "#/$defs/AuthoringBindPackArgsV1"
+        },
+        {
           "$ref": "#/$defs/AuthoringEmptyArgsV1"
         }
       ],
@@ -543,6 +676,24 @@
           "$ref": "#/$defs/AuthoringPauseResultV1"
         },
         {
+          "$ref": "#/$defs/AuthoringGetCoachResultV1"
+        },
+        {
+          "$ref": "#/$defs/AuthoringBindPackResultV1"
+        },
+        {
+          "$ref": "#/$defs/AuthoringRecordingResultV1"
+        },
+        {
+          "$ref": "#/$defs/AuthoringClickResultV1"
+        },
+        {
+          "$ref": "#/$defs/AuthoringHaltResultV1"
+        },
+        {
+          "$ref": "#/$defs/AuthoringSetCoachResultV1"
+        },
+        {
           "$ref": "#/$defs/AuthoringErrorResultV1"
         },
         {
@@ -577,5 +728,6 @@
     "client_id_sha256"
   ],
   "title": "AuthoringCommandV1",
-  "type": "object"
+  "type": "object",
+  "x-openadapt-max-enqueue-bytes": 8192
 }

@@ -75,6 +75,8 @@ out the pixels. Coordinates are the thing that breaks when a window moves.
 | `ProcessEvidenceReceiptV1` | One signed root over child receipts, human receipts, and the artifact graph |
 | `AuthenticationTaskContractV1` | A value-free login requirement bound to an existing attended task |
 | `AuthoringObserveV1` | PHI-safe authoring observe tree for the hosted MCP wire |
+| `AuthoringCommandV1` | Mailbox envelope. Hosted click is `node_id` only; compile is `needs_human_admit` |
+| `AuthoringBindV1` | Bind status plus exact `oab_` / `oals_` parsers. No tree, tokens, or secrets |
 
 Plus the versioned wire contracts: `ControlOverlayFrameV1`/`V2` and
 `ControlOverlayTimelineV1`/`V2` for PHI-safe execution overlays,
