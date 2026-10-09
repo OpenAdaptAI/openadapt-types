@@ -158,10 +158,28 @@ class Finding:
 
 @dataclass(frozen=True)
 class Fragment:
-    """User-visible text and the 1-based line it starts on."""
+    """User-visible text, the 1-based line it starts on, and where it ends.
+
+    ``end_line`` matters for text built from several source lines, such as
+    adjacent Python string literals that the parser joins into one.
+    """
 
     line: int
     text: str
+    end_line: int | None = None
+
+    @property
+    def last_line(self) -> int:
+        return max(self.end_line or self.line, self.line + self.text.count("\n"))
+
+
+def _locate(lines: Sequence[str], fragment: Fragment, pattern: re.Pattern[str]) -> int:
+    """The source line inside ``fragment`` where ``pattern`` first matches."""
+
+    for number in range(fragment.line, fragment.last_line + 1):
+        if 0 < number <= len(lines) and pattern.search(lines[number - 1]):
+            return number
+    return fragment.line
 
 
 @dataclass(frozen=True)
@@ -498,7 +516,7 @@ def _python_fragments(text: str) -> Iterator[Fragment]:
             and id(node) not in docstrings
             and re.search(r"\s", node.value.strip())
         ):
-            yield Fragment(node.lineno, node.value)
+            yield Fragment(node.lineno, node.value, getattr(node, "end_lineno", None))
 
 
 def _json_fragments(text: str) -> Iterator[Fragment]:
@@ -727,13 +745,10 @@ def check_terms(
         findings.extend(problems)
         skipped = _advanced_lines(lines)
         for fragment in extract_fragments(path, text):
-            if fragment.line in skipped:
-                continue
             hits = [
                 (match, rule)
                 for rule in rules
                 for match in rule.pattern.finditer(fragment.text)
-                if not _allowed(allowed, fragment.line, rule.term_id, rule.term)
             ]
             hits.sort(key=lambda hit: (hit[0].start(), -(hit[0].end() - hit[0].start())))
             taken: list[tuple[int, int]] = []
@@ -743,13 +758,18 @@ def check_terms(
                 if any(start <= span[0] and span[1] <= end for start, end in taken):
                     continue
                 taken.append(span)
-                if (rule.term_id, rule.term) in reported:
+                line = _locate(lines, fragment, re.compile(re.escape(match.group(0)), rule.pattern.flags))
+                if line in skipped or (rule.term_id, rule.term) in reported:
+                    continue
+                if _allowed(allowed, line, rule.term_id, rule.term) or _allowed(
+                    allowed, fragment.line, rule.term_id, rule.term
+                ):
                     continue
                 reported.add((rule.term_id, rule.term))
                 findings.append(
                     Finding(
                         str(path),
-                        fragment.line,
+                        line,
                         f"term:{rule.term_id}",
                         rule.severity,
                         f"{match.group(0)!r} is {rule.min_level}-level wording on a {level} surface. "
@@ -783,15 +803,21 @@ def check_claims(
         findings.extend(problems)
         for fragment in extract_fragments(path, text):
             match = next((m for c in claims if (m := c.search(fragment.text))), None)
-            if match is None or _allowed(allowed, fragment.line, NO_CHANGE_CLAIM_RULE):
+            if match is None:
                 continue
-            last = fragment.line + fragment.text.count("\n")
-            nearby = "\n".join(lines[max(0, fragment.line - 1 - window) : last + window])
+            line = _locate(lines, fragment, re.compile(re.escape(match.group(0)), re.IGNORECASE))
+            if _allowed(allowed, line, NO_CHANGE_CLAIM_RULE) or _allowed(
+                allowed, fragment.line, NO_CHANGE_CLAIM_RULE
+            ):
+                continue
+            nearby = "\n".join(
+                lines[max(0, fragment.line - 1 - window) : fragment.last_line + window]
+            )
             if stop.search(nearby) and not proof.search(nearby):
                 findings.append(
                     Finding(
                         str(path),
-                        fragment.line,
+                        line,
                         NO_CHANGE_CLAIM_RULE,
                         "error",
                         f"{match.group(0)!r} next to a halt or stop with no outcome that proves no effect. "
@@ -853,8 +879,14 @@ def check_coverage(
     *,
     enums: Sequence[str] = (),
     values: dict[str, Sequence[str]] | None = None,
+    partial: bool = False,
 ) -> list[Finding]:
-    """Every emitted value must map to a plain result or a progress label."""
+    """Every emitted value must map to a plain result or a progress label.
+
+    Without ``partial``, a value the table maps but the emitter doesn't have
+    is a warning, because the row may be stale. Pass ``partial=True`` for an
+    emitter that only ever sends some of a source's values.
+    """
 
     findings: list[Finding] = []
     checks: list[tuple[str, str, list[str]]] = []
@@ -881,7 +913,7 @@ def check_coverage(
                         f"{source}={value!r} has no plain result. Add a row to outcomes.json before this value ships.",
                     )
                 )
-        for value in sorted(known - set(members)):
+        for value in [] if partial else sorted(known - set(members)):
             findings.append(
                 Finding(
                     where,
@@ -924,7 +956,8 @@ def check_config(config_path: Path, vocabulary: dict[str, Any], table: dict[str,
          "claims": ["src", "docs"],
          "exclude": ["*/vendor/*"],
          "coverage": {"enums": ["pkg.mod:Outcome=transaction_outcome"],
-                      "values": {"agent_status": ["success", "halt"]}}}
+                      "values": {"agent_status": ["success", "halt"]},
+                      "partial": false}}
     """
 
     try:
@@ -943,7 +976,12 @@ def check_config(config_path: Path, vocabulary: dict[str, Any], table: dict[str,
     coverage = config.get("coverage", {})
     if coverage:
         findings.extend(
-            check_coverage(table, enums=coverage.get("enums", []), values=coverage.get("values"))
+            check_coverage(
+                table,
+                enums=coverage.get("enums", []),
+                values=coverage.get("values"),
+                partial=bool(coverage.get("partial", False)),
+            )
         )
     return findings
 
@@ -991,6 +1029,11 @@ def build_parser() -> argparse.ArgumentParser:
     )
     coverage.add_argument("--enum", action="append", default=[], metavar="MODULE:ATTRIBUTE=SOURCE")
     coverage.add_argument("--values", action="append", default=[], metavar="SOURCE=V1,V2")
+    coverage.add_argument(
+        "--partial",
+        action="store_true",
+        help="the emitters send only some values, so don't warn about rows they lack",
+    )
     check = commands.add_parser("check", parents=[common], help="run what a .vocab.json file asks for")
     check.add_argument("--config", type=Path, required=True)
     return parser
@@ -1008,7 +1051,9 @@ def main(argv: Sequence[str] | None = None) -> int:
         elif args.command == "claims":
             findings = check_claims(args.paths, vocabulary, exclude=args.exclude)
         elif args.command == "coverage":
-            findings = check_coverage(table, enums=args.enum, values=_parse_values(args.values))
+            findings = check_coverage(
+                table, enums=args.enum, values=_parse_values(args.values), partial=args.partial
+            )
         else:
             findings = check_config(args.config, vocabulary, table)
     except (RegistryError, ValueError, ImportError, AttributeError, OSError) as exc:

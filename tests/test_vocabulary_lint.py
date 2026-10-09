@@ -347,6 +347,29 @@ def test_a_no_change_claim_after_a_bare_halt_is_an_error(tmp_path: Path, sentenc
     assert _rules(findings) == [(5, "no-change-claim", "error")]
 
 
+def test_a_claim_inside_joined_python_literals_is_found_on_its_own_line(tmp_path: Path) -> None:
+    # Adjacent literals become one string that starts far from the claim.
+    module = _write(
+        tmp_path,
+        "server.py",
+        "\n".join(
+            [
+                "INSTRUCTIONS = (",
+                '    "Local bridge exposing workflows as tools. "',
+                '    "Each tool returns a structured outcome. "',
+                '    "Only status success means the workflow completed. "',
+                '    "Read the outcome before you answer. "',
+                '    "Never report a refused run as a success. "',
+                '    "If execution_outcome is HALTED, tell the user the record did not change. "',
+                '    "Keep evidence local."',
+                ")",
+            ]
+        ),
+    )
+    findings = check_claims([module], VOCABULARY)
+    assert _rules(findings) == [(7, "no-change-claim", "error")]
+
+
 def test_a_no_change_claim_next_to_a_proving_outcome_passes(tmp_path: Path) -> None:
     module = _write(
         tmp_path,
@@ -393,6 +416,13 @@ def test_coverage_reports_unmapped_and_stale_values() -> None:
         ("error", True, False),
         ("warn", False, True),
     ]
+
+
+def test_partial_coverage_skips_stale_warnings() -> None:
+    findings = check_coverage(TABLE, values={"execution_outcome": ["VERIFIED", "HALTED"]}, partial=True)
+    assert findings == []
+    assert main(["coverage", "--partial", "--strict", "--values", "execution_outcome=VERIFIED"]) == 0
+    assert main(["coverage", "--strict", "--values", "execution_outcome=VERIFIED"]) == 1
 
 
 def test_coverage_reads_literals_and_pydantic_fields(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
