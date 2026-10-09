@@ -771,7 +771,7 @@ def check_claims(
                         "error",
                         f"{match.group(0)!r} next to a halt or stop with no outcome that proves no effect. "
                         "Derive the sentence from transaction_outcome or the Execute terminal outcome "
-                        "(openadapt_types.plain_outcome), never from HALTED alone.",
+                        "(openadapt_types.plain_results), never from HALTED alone.",
                     )
                 )
     return findings

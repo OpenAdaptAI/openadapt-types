@@ -9,7 +9,7 @@ Two JSON files are the source of truth, so code in any language can read them:
     How every run outcome OpenAdapt emits maps to one plain result, whether
     anything may have changed, and whether a retry is safe.
 
-:mod:`openadapt_types.plain_outcome` applies the outcome table in Python.
+:mod:`openadapt_types.plain_results` applies the outcome table in Python.
 :mod:`openadapt_types.vocabulary.lint` checks user-facing text against the
 registry and needs only the standard library.
 """

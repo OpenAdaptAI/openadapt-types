@@ -5,7 +5,7 @@
     "The plain result comes from the precise outcome (transaction_outcome or the Execute terminal outcome), never from the coarse HALTED label alone.",
     "Only an outcome that proves no effect sets may_have_changed=false and safe_to_retry=true.",
     "safe_to_retry means a new attempt can't duplicate or collide with a write from this attempt. It doesn't promise the new attempt will succeed.",
-    "openadapt_types.plain_outcome applies these rules in Python. Other languages apply the same merge_rules and check themselves against outcome-vectors.json."
+    "openadapt_types.plain_results applies these rules in Python. Other languages apply the same merge_rules and check themselves against outcome-vectors.json."
   ],
   "emitters": [
     {
