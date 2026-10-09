@@ -177,7 +177,7 @@ python vendor/vocabulary/lint.py terms --level business README.md
 | Command | What it checks |
 |---|---|
 | `terms --level business\|detail` | No technical term deeper than the file's level |
-| `claims` | No "nothing was written", "did not change", "stopped safely", or "safe to re-run" next to a halt, stop, failure, or timeout unless an outcome that proves no effect is nearby |
+| `claims` | No "nothing was written", "did not change", "stopped safely", or "safe to re-run" next to a halt, stop, failure, or timeout unless an outcome that proves no effect is nearby <!-- vocab-allow: no-change-claim -- names the phrases the check looks for --> |
 | `coverage` | Every value of an outcome enum has a plain result |
 | `check --config .vocab.json` | Whatever the config asks for |
 
@@ -245,6 +245,6 @@ On 2026-10-09:
   `openadapt-flow` origin/main `6e4e4ed0` with 0 errors.
 - `openadapt-vocab-lint claims` on `openadapt-agent` origin/main `88b1dbd`
   (README, `llms.txt`, the skill, and the runner, copy, and MCP modules)
-  reported 10 claims that a halt alone can't support, including "Tell the
+  reported 10 claims that a halt alone can't support, including "Tell the <!-- vocab-allow: no-change-claim -- quotes the wording the check found -->
   user the record did not change" in `runner.py`, `copy.py`, and the MCP
   server instructions.

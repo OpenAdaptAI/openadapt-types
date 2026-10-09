@@ -134,7 +134,7 @@
       }
     },
     {
-      "name": "coarse HALTED alone never says nothing changed",
+      "name": "coarse HALTED alone reads check the record",
       "rule": "row",
       "input": {
         "execution_outcome": "HALTED"

@@ -3,7 +3,7 @@
   "updated": "2026-10-09",
   "_about": [
     "One plain term per concept for business-facing surfaces, with the exact technical term kept one level deeper.",
-    "min_level is the shallowest level where a technical term may appear. A term never moves off engineering surfaces.",
+    "A business_term may appear at every level. min_level is the shallowest level where a technical term may appear. A technical term never moves off engineering surfaces.",
     "severity error marks the terms that must never reach a business-facing first screen. severity warn marks the rest.",
     "Patterns use syntax that Python re and JavaScript RegExp both accept. case_sensitive false means the i flag.",
     "openadapt_types.vocabulary.lint reads this file and checks that every term with a result uses the same label as outcomes.json."
