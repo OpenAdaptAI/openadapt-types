@@ -86,8 +86,9 @@ from this attempt. It doesn't promise that the new attempt will succeed.
 
 ### Which value decides
 
-Outcome values come in three tiers. The first tier that has a value decides,
-and a lower tier never overrides it.
+Outcome values come in three tiers. The first tier that has a value decides.
+The one exception only adds caution: when `transaction_outcome` and
+`execution_outcome` disagree, the result is "Check the record".
 
 | Tier | Sources | Where they come from |
 |---|---|---|
