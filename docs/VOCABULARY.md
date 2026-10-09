@@ -57,6 +57,10 @@ Standard profile, substrate, fixture, REST+SQL parity, non-target delta,
 sha256, Program State Console, and MCP. `vocabulary.json` gives a suggestion
 for each one.
 
+A pattern matches the word, not its sense. "Admission" also means a hospital
+admission, and "capture" and "program" have everyday meanings. When a business
+page uses one of those senses, add a `vocab-allow` comment that says so.
+
 ## Run results
 
 A run ends in one of six results. `outcomes.json` maps every outcome value to

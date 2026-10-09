@@ -163,7 +163,7 @@ PUFFERY = re.compile(
 
 def test_the_registry_plain_text_follows_the_writing_rules() -> None:
     for sentence in _registry_sentences():
-        assert "—" not in sentence and "–" not in sentence, sentence
+        assert "\u2014" not in sentence and "\u2013" not in sentence, sentence
         assert not PUFFERY.search(sentence), sentence
         assert "!" not in sentence, sentence
 
