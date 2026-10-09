@@ -208,3 +208,19 @@ The admitted MCP names are `run_harvest`, `run_attach_fax`, and
 `RECONCILIATION_REQUIRED`. `is_verified_success` is true only for
 `VERIFIED`. There is no success flag a caller can set to launder a halt.
 There is no tool that decides urgency or writes follow-up copy.
+
+## Plain results
+
+`plain-outcome-v1.json` describes one run's result for a person or a calling
+agent: `result`, `label`, `may_have_changed`, `safe_to_retry`, `proof`,
+`next_action`, `technical_code`, and `exact`. The label and next step come
+from the registry in `openadapt_types/vocabulary/outcomes.json`, never from
+screen text, so the object carries no PHI. `exact` holds only the status
+codes the result came from; a value that isn't shaped like a status code is
+treated as unrecognized and left out.
+
+The schema refuses a result that breaks the safety rule. Only a result that
+proves no effect may set `may_have_changed` to false, `safe_to_retry` needs
+`may_have_changed` false, and `sealed` proof needs an Execute terminal outcome.
+`plain-progress-v1.json` covers a run that hasn't ended; it always has
+`safe_to_retry` false. [VOCABULARY.md](VOCABULARY.md) has the full mapping.

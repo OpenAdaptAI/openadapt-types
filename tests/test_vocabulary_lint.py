@@ -531,3 +531,18 @@ def test_the_registry_ships_inside_the_package() -> None:
     for name in ("vocabulary.json", "outcomes.json", "outcome-vectors.json", "lint.py"):
         assert (REGISTRY_DIR / name).is_file()
     assert REGISTRY_DIR == ROOT / "openadapt_types" / "vocabulary"
+
+
+def test_the_vocabulary_doc_matches_the_registry() -> None:
+    doc = (ROOT / "docs" / "VOCABULARY.md").read_text(encoding="utf-8")
+    for term in VOCABULARY["terms"]:
+        if term.get("business_term"):
+            assert term["business_term"] in doc, term["id"]
+        for variant in term.get("technical", []):
+            assert variant["term"] in doc, variant["term"]
+    for result, spec in TABLE["results"].items():
+        assert f"| `{result}` | {spec['label']} |" in doc
+    cases = len(json.loads((REGISTRY_DIR / "outcome-vectors.json").read_text())["cases"])
+    assert f"{cases} hand-written cases" in doc
+    words = {11: "eleven"}
+    assert f"{words[len(lint.NO_EFFECT_PROOFS)]} rows allowed to say so" in doc

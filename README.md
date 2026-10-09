@@ -83,6 +83,7 @@ out the pixels. Coordinates are the thing that breaks when a window moves.
 | `ClinicInboxV1` | Workbench job: opaque `patient_token`, artifact path, source, time |
 | `ClinicOutboxV1` | Actuation intent. `needs_human: true` does not dispatch |
 | `ClinicToolResultV1` | MCP result: `VERIFIED`, `HALTED`, or `RECONCILIATION_REQUIRED`. Halt is not success |
+| `PlainOutcomeV1` | One run's result in plain words, whether anything may have changed, and whether a retry is safe |
 
 Plus the versioned wire contracts: `ControlOverlayFrameV1`/`V2` and
 `ControlOverlayTimelineV1`/`V2` for PHI-safe execution overlays,
@@ -95,6 +96,29 @@ adapter are in [docs/ORACLE.md](docs/ORACLE.md). Code capabilities and process
 artifacts are in [docs/PROCESS_CAPABILITIES.md](docs/PROCESS_CAPABILITIES.md). Reward
 contracts and certificates for training against a verified terminal effect
 are in [docs/REWARD.md](docs/REWARD.md).
+
+## Tell people how a run ended
+
+`plain_outcome()` turns the outcome values a surface has into one result a
+person can act on, with the next step in plain words:
+
+```python
+from openadapt_types import plain_outcome
+
+result = plain_outcome(
+    transaction_outcome="RECONCILIATION_REQUIRED",
+    execution_outcome="HALTED",
+)
+print(result.label)        # Check the record
+print(result.next_action)  # A save may have gone through. Check the record before anyone runs this again.
+print(result.safe_to_retry)  # False
+```
+
+The precise outcome decides. A bare `HALTED` never reads as "nothing was
+written", and anything unknown or contradictory reads "Check the record".
+The same table ships as JSON for other languages, and `openadapt-vocab-lint`
+checks user-facing text against the shared vocabulary. Details are in
+[docs/VOCABULARY.md](docs/VOCABULARY.md).
 
 ## JSON Schema for everything else
 
