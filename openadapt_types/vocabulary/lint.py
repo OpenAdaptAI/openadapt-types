@@ -83,6 +83,26 @@ NO_CHANGE_RESULTS = frozenset({"stopped_before_change", "refused"})
 #: Results that can never claim nothing changed or invite a retry.
 MAY_CHANGE_RESULTS = frozenset({"done", "check_the_record", "finished_not_checked"})
 NO_CHANGE_CLAIM_RULE = "no-change-claim"
+#: The only rows allowed to say nothing changed. Each one is an engine value
+#: that, by its own contract, proves the run made no business effect (Flow
+#: transaction.py, Execute v1), or a refusal before anything ran. A
+#: ``.if_not_dispatched`` row applies only when the caller states the request
+#: never reached the app. Adding a row here is a safety review, not a copy edit.
+NO_EFFECT_PROOFS = frozenset(
+    {
+        "sources.transaction_outcome.HALTED_BEFORE_EFFECT",
+        "sources.transaction_outcome.FAILED_PLATFORM",
+        "sources.transaction_outcome.CANCELED",
+        "sources.transaction_outcome.REJECTED_POLICY",
+        "sources.execute_terminal_outcome.halted_before_effect",
+        "sources.execute_terminal_outcome.rejected_policy",
+        "sources.execute_terminal_outcome.failed_platform",
+        "sources.agent_status.refused",
+        "sources.agent_status.timeout.if_not_dispatched",
+        "sources.agent_status.error.if_not_dispatched",
+        "sources.connector_status.failed.if_not_dispatched",
+    }
+)
 
 _TEXT_SUFFIXES = {".md", ".mdx", ".markdown", ".txt", ".rst"}
 _HTML_SUFFIXES = {".html", ".htm"}
@@ -316,11 +336,16 @@ def validate_outcome_table(table: dict[str, Any]) -> None:
     fallbacks = table.get("fallbacks")
     if not isinstance(fallbacks, dict) or tuple(sorted(fallbacks)) != tuple(sorted(FALLBACKS)):
         raise RegistryError(f"fallbacks must define {FALLBACKS}")
-    for where, row in _rows(table):
-        _check_row(where, row)
     for name, row in fallbacks.items():
+        _check_row(f"fallbacks.{name}", row)
         if row["result"] != "check_the_record":
             raise RegistryError(f"fallbacks.{name} must fail closed to check_the_record")
+    for where, row in _rows(table):
+        _check_row(where, row)
+        if not row["may_have_changed"] and where not in NO_EFFECT_PROOFS:
+            raise RegistryError(
+                f"{where} says nothing changed, but that value doesn't prove no effect"
+            )
     coarse = set(sources.get("execution_outcome", {}).get("values", {}))
     for value, row in sources.get("transaction_outcome", {}).get("values", {}).items():
         allowed = row.get("execution_outcomes")
