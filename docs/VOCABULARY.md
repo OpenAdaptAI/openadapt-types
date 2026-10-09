@@ -38,7 +38,7 @@ engineering level, so engineers and auditors keep the exact name.
 | the automation | program, compiled program, bundle, compile | What OpenAdapt builds from the recording. |
 | run | replay | One time the automation does the task. |
 | Done and checked | VERIFIED | It saved the entry and read the record back to confirm it. |
-| Stopped before saving | HALTED_BEFORE_EFFECT, CANCELED, HALTED | Something didn't match, so it stopped before changing anything and asked a person. Nothing was written. |
+| Stopped before saving | HALTED_BEFORE_EFFECT, CANCELED | Something didn't match, so it stopped before changing anything and asked a person. Nothing was written. |
 | Check the record | RECONCILIATION_REQUIRED, ROLLED_BACK, reconciliation | A save may have gone through. A person checks the record before anything is retried. |
 | Finished, not checked | COMPLETED_UNVERIFIED | It did the steps but didn't confirm the saved result. |
 | Didn't finish | FAILED_PLATFORM, FAILED | It couldn't complete the task. The next step says what's known about whether anything was written. |
@@ -56,6 +56,12 @@ Some internal words have no plain term. Say what they mean instead: governed,
 Standard profile, substrate, fixture, REST+SQL parity, non-target delta,
 sha256, Program State Console, and MCP. `vocabulary.json` gives a suggestion
 for each one.
+
+A bare `HALTED` has no plain term either, because on its own it doesn't say
+whether anything was written. Say "Check the record". Say "Stopped before
+saving" only when `transaction_outcome` is `HALTED_BEFORE_EFFECT`. The
+registry refuses an outcome value filed under a result it doesn't read as on
+its own, so the lint can't suggest the wrong words.
 
 A pattern matches the word, not its sense. "Admission" also means a hospital
 admission, and "capture" and "program" have everyday meanings. When a business

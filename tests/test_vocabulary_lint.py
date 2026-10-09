@@ -235,6 +235,27 @@ def test_the_pair_check_refuses_a_no_change_claim_on_a_row_that_may_have_changed
         validate_registry_pair(vocabulary, table)
 
 
+def _move_halted_under_stopped_before_saving(vocabulary: dict[str, Any], _: dict[str, Any]) -> None:
+    terms = {term["id"]: term for term in vocabulary["terms"]}
+    halted = terms["coarse_halt"]["technical"].pop()
+    terms["stopped_before_saving"]["technical"].append(halted)
+
+
+def test_the_pair_check_refuses_an_outcome_term_under_a_result_it_doesnt_prove() -> None:
+    # A bare HALTED reads "Check the record". Filing it under "Stopped before
+    # saving" would make the lint suggest a no-change claim for it.
+    vocabulary, table = _broken(_move_halted_under_stopped_before_saving)
+    with pytest.raises(RegistryError, match="HALTED on its own reads as"):
+        validate_registry_pair(vocabulary, table)
+
+
+def test_the_lint_never_suggests_a_no_change_label_for_a_bare_halt(tmp_path: Path) -> None:
+    page = _write(tmp_path, "status.md", "Status: HALTED\n")
+    (finding,) = check_terms([page], "business", VOCABULARY)
+    assert "Say: Check the record." in finding.message
+    assert "Say: Stopped before saving" not in finding.message
+
+
 # ------------------------------------------------------------------- terms
 
 

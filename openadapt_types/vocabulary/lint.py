@@ -409,8 +409,25 @@ def validate_registry_pair(vocabulary: dict[str, Any], table: dict[str, Any]) ->
 
     * A vocabulary term that names a result uses that result's label, and every
       result has such a term.
+    * A technical term that is itself an outcome value, such as ``HALTED``,
+      sits under a result that value reads as on its own. Otherwise the lint
+      would suggest plain words that claim more than the value proves.
     * A row that may have changed something never carries a no-change claim.
     """
+
+    reads_as: dict[str, set[str]] = {}
+    for spec in table["sources"].values():
+        for value, row in spec["values"].items():
+            reads_as.setdefault(value, set()).add(row["result"])
+    for term in vocabulary["terms"]:
+        result = term.get("result")
+        for variant in term.get("technical", []):
+            results = reads_as.get(variant["term"])
+            if result is not None and results is not None and result not in results:
+                raise RegistryError(
+                    f"{term['id']}/{variant['term']}: {variant['term']} on its own reads as "
+                    f"{sorted(results)}, not {result}"
+                )
 
     named: dict[str, str] = {}
     for term in vocabulary["terms"]:

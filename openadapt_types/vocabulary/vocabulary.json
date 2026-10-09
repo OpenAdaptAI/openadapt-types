@@ -92,7 +92,15 @@
       "meaning": "Something didn't match, so it stopped before changing anything and asked a person. Nothing was written.",
       "technical": [
         {"term": "HALTED_BEFORE_EFFECT", "pattern": "\\bHALTED_BEFORE_EFFECT\\b", "case_sensitive": false, "min_level": "detail", "severity": "error"},
-        {"term": "CANCELED", "pattern": "\\bCANCELED\\b", "case_sensitive": true, "min_level": "detail", "severity": "error"},
+        {"term": "CANCELED", "pattern": "\\bCANCELED\\b", "case_sensitive": true, "min_level": "detail", "severity": "error"}
+      ]
+    },
+    {
+      "id": "coarse_halt",
+      "business_term": null,
+      "use_instead": "Check the record. Say Stopped before saving only when transaction_outcome is HALTED_BEFORE_EFFECT, and Stopped for review where you claim nothing about a write.",
+      "meaning": "The coarse stop label. On its own it doesn't say whether anything was written.",
+      "technical": [
         {"term": "HALTED", "pattern": "\\bHALT(ED|S)?\\b", "case_sensitive": true, "min_level": "detail", "severity": "error"}
       ]
     },
