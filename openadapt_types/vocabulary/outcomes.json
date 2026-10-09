@@ -4,51 +4,111 @@
     "Maps every run outcome OpenAdapt emits to one plain result.",
     "The plain result comes from the precise outcome (transaction_outcome or the Execute terminal outcome), never from the coarse HALTED label alone.",
     "Only an outcome that proves no effect sets may_have_changed=false and safe_to_retry=true.",
-    "safe_to_retry means a new attempt cannot duplicate or collide with a write from this attempt. It does not promise the new attempt will succeed.",
-    "openadapt_types.plain_outcome reads this file. Other languages can apply the same rules from it: see merge_rules."
+    "safe_to_retry means a new attempt can't duplicate or collide with a write from this attempt. It doesn't promise the new attempt will succeed.",
+    "openadapt_types.plain_outcome applies these rules in Python. Other languages apply the same merge_rules and check themselves against outcome-vectors.json."
   ],
-  "_sources": [
+  "emitters": [
     {
       "source": "transaction_outcome",
       "repository": "OpenAdaptAI/openadapt-flow",
-      "symbol": "openadapt_flow/transaction.py TransactionOutcome; openadapt_flow/ir.py RunReport.transaction_outcome",
-      "read_at": "origin/main 6e4e4ed0 on 2026-10-08"
+      "symbol": "openadapt_flow/transaction.py TransactionOutcome",
+      "read_at": "origin/main 6e4e4ed0, read 2026-10-09",
+      "values": ["VERIFIED", "HALTED_BEFORE_EFFECT", "RECONCILIATION_REQUIRED", "FAILED_PLATFORM", "CANCELED", "REJECTED_POLICY", "COMPLETED_UNVERIFIED", "ROLLED_BACK"]
+    },
+    {
+      "source": "transaction_outcome",
+      "repository": "OpenAdaptAI/openadapt-flow",
+      "symbol": "openadapt_flow/ir.py RunReport.transaction_outcome (report.json)",
+      "read_at": "origin/main 6e4e4ed0, read 2026-10-09",
+      "values": ["VERIFIED", "HALTED_BEFORE_EFFECT", "RECONCILIATION_REQUIRED", "FAILED_PLATFORM", "CANCELED", "REJECTED_POLICY", "COMPLETED_UNVERIFIED", "ROLLED_BACK"]
+    },
+    {
+      "source": "transaction_outcome",
+      "repository": "OpenAdaptAI/openadapt-flow",
+      "symbol": "openadapt_flow/runner/hosted_adapter.py HostedTerminalEventV1.outcome and HostedTerminalEventV2.outcome. Pass started as dispatched and uncertain_delivery as delivery_uncertain.",
+      "read_at": "origin/main 6e4e4ed0, read 2026-10-09",
+      "values": ["VERIFIED", "HALTED_BEFORE_EFFECT", "RECONCILIATION_REQUIRED", "FAILED_PLATFORM", "CANCELED", "REJECTED_POLICY", "COMPLETED_UNVERIFIED", "ROLLED_BACK"]
+    },
+    {
+      "source": "transaction_outcome",
+      "repository": "OpenAdaptAI/openadapt-flow",
+      "symbol": "openadapt_flow/terminal_verification_v2.py production run receipt transaction_outcome",
+      "read_at": "origin/main 6e4e4ed0, read 2026-10-09",
+      "values": ["VERIFIED", "HALTED_BEFORE_EFFECT", "RECONCILIATION_REQUIRED"]
     },
     {
       "source": "execution_outcome",
       "repository": "OpenAdaptAI/openadapt-flow",
-      "symbol": "openadapt_flow/execution_profiles.py ExecutionOutcome; openadapt_flow/ir.py RunReport.execution_outcome",
-      "read_at": "origin/main 6e4e4ed0 on 2026-10-08"
+      "symbol": "openadapt_flow/ir.py RunReport.execution_outcome and ExecutionOutcomeEnvelope.outcome",
+      "read_at": "origin/main 6e4e4ed0, read 2026-10-09",
+      "values": ["VERIFIED", "COMPLETED_UNVERIFIED", "HALTED", "FAILED", "ROLLED_BACK"]
+    },
+    {
+      "source": "execution_outcome",
+      "repository": "OpenAdaptAI/openadapt-flow",
+      "symbol": "openadapt_flow/terminal_verification_v2.py ProductionExecutionOutcome.outcome",
+      "read_at": "origin/main 6e4e4ed0, read 2026-10-09",
+      "values": ["VERIFIED", "HALTED", "FAILED", "ROLLED_BACK"]
     },
     {
       "source": "connector_status",
       "repository": "OpenAdaptAI/openadapt-flow",
       "symbol": "openadapt_flow/connector/executor.py ExecutionResult.status and status_from_report",
-      "read_at": "origin/main 6e4e4ed0 on 2026-10-08"
+      "read_at": "origin/main 6e4e4ed0, read 2026-10-09",
+      "values": ["success", "halt", "failed"]
+    },
+    {
+      "source": "program_terminal_state",
+      "repository": "OpenAdaptAI/openadapt-flow",
+      "symbol": "openadapt_flow/ir.py RunReport.terminal_outcome and State.outcome. This is where the program graph ended, not the Execute terminal outcome.",
+      "read_at": "origin/main 6e4e4ed0, read 2026-10-09",
+      "values": ["success", "halt", "escalate"]
     },
     {
       "source": "execute_terminal_outcome",
       "repository": "OpenAdaptAI/openadapt-types",
-      "symbol": "openadapt_types/execute.py ExecuteTerminalOutcomeV1",
-      "read_at": "origin/main 07b8b0c on 2026-10-08"
+      "symbol": "openadapt_types/execute.py ExecuteTerminalOutcomeV1 (openadapt_flow/execute/dispatch.py sets it too)",
+      "read_at": "origin/main 07b8b0c, read 2026-10-09",
+      "values": ["verified", "halted_before_effect", "reconciliation_required", "rejected_policy", "failed_platform", "rolled_back_verified"]
     },
     {
       "source": "execute_state",
       "repository": "OpenAdaptAI/openadapt-types",
       "symbol": "openadapt_types/execute.py ExecuteLifecycleStateV1",
-      "read_at": "origin/main 07b8b0c on 2026-10-08"
+      "read_at": "origin/main 07b8b0c, read 2026-10-09",
+      "values": ["queued", "running", "decision_required", "waiting_for_reconciliation", "terminal"]
     },
     {
       "source": "clinic_tool_status",
       "repository": "OpenAdaptAI/openadapt-types",
       "symbol": "openadapt_types/clinic_job.py ClinicToolStatusV1",
-      "read_at": "origin/main 07b8b0c on 2026-10-08"
+      "read_at": "origin/main 07b8b0c, read 2026-10-09",
+      "values": ["VERIFIED", "HALTED", "RECONCILIATION_REQUIRED"]
     },
     {
       "source": "agent_status",
       "repository": "OpenAdaptAI/openadapt-agent",
       "symbol": "src/openadapt_agent/runner.py RunOutcome.status",
-      "read_at": "origin/main 88b1dbd on 2026-10-08"
+      "read_at": "origin/main 88b1dbd, read 2026-10-09",
+      "values": ["success", "halt", "refused", "timeout", "error"]
+    }
+  ],
+  "not_run_outcomes": [
+    {
+      "symbol": "openadapt_flow/runtime/effects/effect.py Verdict (confirmed, refuted, indeterminate)",
+      "reason": "One effect check inside a step. The run's outcome already accounts for it."
+    },
+    {
+      "symbol": "openadapt_flow/runtime/durable/attended.py AttendedExecutionResult.status and AttendedDecision.status",
+      "reason": "The result of one person's action on a paused run. The run's own outcome arrives in its report."
+    },
+    {
+      "symbol": "openadapt_flow/validation/hardening/harness.py Outcome",
+      "reason": "A test-harness classification, never shown for a real run."
+    },
+    {
+      "symbol": "openadapt_flow/qualification.py case status, runtime/durable/checkpoint.py status, and authoring.py status",
+      "reason": "Readiness-test, checkpoint, and authoring states, not run results."
     }
   ],
   "results": {
@@ -73,8 +133,8 @@
       "meaning": "It couldn't complete the task. The next step says what's known about whether anything was written."
     },
     "refused": {
-      "label": "Refused",
-      "meaning": "A rule, an approval, or the right-record check didn't allow the run, so it changed nothing."
+      "label": "Blocked before saving",
+      "meaning": "A rule, an approval, or the right-record check blocked the run before it saved anything. Nothing was written."
     }
   },
   "proof": {
@@ -92,16 +152,17 @@
     }
   },
   "merge_rules": [
-    "1. Each input value selects one row from sources.<source>.values. A value with no row selects fallbacks.unrecognized.",
-    "2. execute_state values listed in in_progress are not results. Report progress instead. The value listed in not_an_outcome adds nothing.",
-    "3. Use only the first tier in tiers that has an input. Ignore the lower tiers.",
-    "4. When execution_outcome and transaction_outcome are both present, execution_outcome must appear in that transaction row's execution_outcomes list. Otherwise use fallbacks.conflict.",
-    "5. Rows in the chosen tier that agree on result: use the first one in precedence order, with may_have_changed true if any row says true and safe_to_retry true only if every row says true.",
-    "6. Rows that disagree on result: if every row has may_have_changed=false, use the first one in precedence order. Otherwise use fallbacks.conflict.",
-    "7. A row with if_not_dispatched uses that variant only when the caller states dispatched=false.",
-    "8. delivery_uncertain=true turns any result except check_the_record into fallbacks.delivery_uncertain.",
-    "9. No input at all selects fallbacks.missing.",
-    "10. proof=sealed requires an execute_terminal_outcome, because a signed receipt carries one."
+    "1. Ignore any input whose value is listed in not_an_outcome for its source.",
+    "2. Use only the first tier in tiers that still has an input. Ignore the lower tiers, except for rule 4.",
+    "3. Each input in that tier selects one row from sources.<source>.values. An execute_state value listed in in_progress selects no row and marks the run as still in progress. A value with no row selects fallbacks.unrecognized and ends the merge.",
+    "4. When transaction_outcome and execution_outcome are both present, execution_outcome must appear in that transaction row's execution_outcomes list. Otherwise use fallbacks.conflict.",
+    "5. A row with if_not_dispatched uses that variant only when the caller states dispatched=false.",
+    "6. If the tier marks the run as in progress and selects no row, there's no result yet: report in_progress.execute_state.<value>. If it also selects a row, use fallbacks.conflict.",
+    "7. Rows that agree on result: use the most cautious row, which is the first in precedence order with may_have_changed=true, else the first with safe_to_retry=false, else the first.",
+    "8. Rows that disagree on result: if every row has may_have_changed=false, use the first in precedence order. Otherwise use fallbacks.conflict.",
+    "9. delivery_uncertain=true turns any result except check_the_record into fallbacks.delivery_uncertain.",
+    "10. No input at all selects fallbacks.missing.",
+    "11. proof defaults to none. proof=sealed needs an execute_terminal_outcome, because a signed receipt always carries one."
   ],
   "precedence": [
     "transaction_outcome",
@@ -110,12 +171,13 @@
     "execution_outcome",
     "agent_status",
     "connector_status",
-    "clinic_tool_status"
+    "clinic_tool_status",
+    "program_terminal_state"
   ],
   "tiers": [
     ["transaction_outcome", "execute_terminal_outcome", "execute_state"],
     ["execution_outcome"],
-    ["agent_status", "connector_status", "clinic_tool_status"]
+    ["agent_status", "connector_status", "clinic_tool_status", "program_terminal_state"]
   ],
   "sources": {
     "transaction_outcome": {
@@ -267,7 +329,7 @@
       }
     },
     "agent_status": {
-      "meaning": "The status the OpenAdapt Agent returns to a calling AI agent. It is coarse: prefer the precise outcome when the result carries one.",
+      "meaning": "The status the OpenAdapt Agent returns to a calling AI agent. It's coarse, so prefer the precise outcome when the result carries one.",
       "values": {
         "success": {
           "result": "finished_not_checked",
@@ -314,7 +376,7 @@
       }
     },
     "connector_status": {
-      "meaning": "The coarse status a Flow connector sends back for one job. Prefer the outcome envelope when it's present.",
+      "meaning": "The coarse status a Flow connector sends back for one job. Prefer the precise outcome when it's present.",
       "values": {
         "success": {
           "result": "finished_not_checked",
@@ -343,7 +405,7 @@
       }
     },
     "clinic_tool_status": {
-      "meaning": "The status on a clinic MCP tool result. HALTED here is coarse.",
+      "meaning": "The status on a clinic tool result. HALTED here is coarse.",
       "values": {
         "VERIFIED": {
           "result": "done",
@@ -362,6 +424,29 @@
           "may_have_changed": true,
           "safe_to_retry": false,
           "next_action": "A save may have gone through. Check the record before anyone runs this again."
+        }
+      }
+    },
+    "program_terminal_state": {
+      "meaning": "Where a workflow program's graph ended. It says where the program stopped, not whether the record was checked.",
+      "values": {
+        "success": {
+          "result": "finished_not_checked",
+          "may_have_changed": true,
+          "safe_to_retry": false,
+          "next_action": "The steps ran, but this status doesn't show that the saved result was checked. Check the record before you count it as done or run it again."
+        },
+        "halt": {
+          "result": "check_the_record",
+          "may_have_changed": true,
+          "safe_to_retry": false,
+          "next_action": "It stopped, and this status doesn't show whether anything was saved. Check the record before anyone runs this again."
+        },
+        "escalate": {
+          "result": "check_the_record",
+          "may_have_changed": true,
+          "safe_to_retry": false,
+          "next_action": "It stopped to ask a person, and this status doesn't show whether anything was saved. Check the record before anyone runs this again."
         }
       }
     }

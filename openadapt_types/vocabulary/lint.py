@@ -2,15 +2,15 @@
 """Check user-facing text against the OpenAdapt vocabulary registry.
 
 Standard library only. Any repository with Python 3.10 or later can run it,
-installed or not::
+installed or copied::
 
-    python -m openadapt_types.vocabulary.lint terms --level business README.md
-    python path/to/lint.py claims src/
-    python path/to/lint.py coverage \\
+    openadapt-vocab-lint terms --level business README.md
+    python -m openadapt_types.vocabulary claims src/
+    python path/to/vocabulary/lint.py coverage \\
         --enum openadapt_flow.transaction:TransactionOutcome=transaction_outcome
-    python path/to/lint.py check --config .vocab.json
+    python path/to/vocabulary/lint.py check --config .vocab.json
 
-Three rules:
+Four commands:
 
 ``terms``
     A file at one surface level must not show a technical term whose
@@ -21,28 +21,39 @@ Three rules:
     alone never proves it.
 ``coverage``
     Every value of an outcome enum must map to a plain result
-    (``outcomes.json``), so a new engine value cannot reach a person unmapped.
+    (``outcomes.json``), so a new engine value can't reach a person unmapped.
+    ``--enum`` takes an Enum class, a ``Literal`` alias, or a Pydantic model
+    field whose annotation holds Literals or Enums.
+``check``
+    Runs whatever a ``.vocab.json`` file asks for.
 
 Exit status: 0 when clean (warnings allowed), 1 when there is an error finding
 (or any finding with ``--strict``), 2 for a usage or registry error.
 
-Escape hatches, both of which need a reason after ``--``:
+Two escape hatches. Both need a reason after ``--``:
 
 * ``vocab-allow: <term or rule> -- <reason>`` on the same line or the line
   above silences that term (or ``no-change-claim``) there.
 * Lines between ``vocab: advanced`` and ``vocab: end`` (in any comment
-  syntax) are skipped by ``terms``. Use it for a Technical details section.
+  syntax), and inside ``<details data-level="advanced">``, are skipped by
+  ``terms``. Use them for a Technical details section.
+
+To use it from another repository without installing this package, copy the
+whole ``vocabulary`` directory (this file and the two JSON files) and run the
+copied ``lint.py``. It finds the registry next to itself.
 """
 
 from __future__ import annotations
 
 import argparse
 import ast
+import enum
 import fnmatch
 import importlib
 import json
 import re
 import sys
+import typing
 from collections.abc import Iterable, Iterator, Sequence
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -51,8 +62,10 @@ from typing import Any
 REGISTRY_DIR = Path(__file__).resolve().parent
 VOCABULARY_FILE = "vocabulary.json"
 OUTCOMES_FILE = "outcomes.json"
+VECTORS_FILE = "outcome-vectors.json"
 VOCABULARY_SCHEMA = "openadapt.vocabulary/v1"
 OUTCOMES_SCHEMA = "openadapt.plain-outcomes/v1"
+VECTORS_SCHEMA = "openadapt.plain-outcome-vectors/v1"
 LEVELS = ("business", "detail", "engineering")
 SEVERITIES = ("error", "warn")
 RESULTS = (
@@ -63,6 +76,8 @@ RESULTS = (
     "did_not_finish",
     "refused",
 )
+PROOFS = ("sealed", "local", "none")
+FALLBACKS = ("conflict", "unrecognized", "missing", "delivery_uncertain")
 #: Results whose label claims nothing changed.
 NO_CHANGE_RESULTS = frozenset({"stopped_before_change", "refused"})
 #: Results that can never claim nothing changed or invite a retry.
@@ -72,9 +87,7 @@ NO_CHANGE_CLAIM_RULE = "no-change-claim"
 _TEXT_SUFFIXES = {".md", ".mdx", ".markdown", ".txt", ".rst"}
 _HTML_SUFFIXES = {".html", ".htm"}
 _SCRIPT_SUFFIXES = {".js", ".jsx", ".ts", ".tsx", ".mjs", ".cjs"}
-_LINTED_SUFFIXES = (
-    _TEXT_SUFFIXES | _HTML_SUFFIXES | _SCRIPT_SUFFIXES | {".py", ".json"}
-)
+_LINTED_SUFFIXES = _TEXT_SUFFIXES | _HTML_SUFFIXES | _SCRIPT_SUFFIXES | {".py", ".json"}
 _SKIPPED_DIRS = {
     ".git",
     ".hg",
@@ -87,7 +100,9 @@ _SKIPPED_DIRS = {
     ".next",
     ".pytest_cache",
 }
-_PRAGMA = re.compile(r"vocab-allow:\s*(?P<names>[^\n]*?)(?:\s+--\s+(?P<reason>\S[^\n]*))?\s*(?:\*/|-->)?\s*$")
+_PRAGMA = re.compile(
+    r"vocab-allow:\s*(?P<names>[^\n]*?)(?:\s+--\s+(?P<reason>\S[^\n]*?))?\s*(?:\*/|-->)?\s*$"
+)
 _ADVANCED_START = re.compile(r"vocab:\s*advanced\b")
 _ADVANCED_END = re.compile(r"vocab:\s*end\b")
 _DETAILS_START = re.compile(r"<details\b[^>]*data-level=[\"']advanced[\"']", re.IGNORECASE)
@@ -169,6 +184,21 @@ def load_outcome_table(directory: Path | None = None) -> dict[str, Any]:
     return table
 
 
+def load_registry(directory: Path | None = None) -> tuple[dict[str, Any], dict[str, Any]]:
+    """Load both files and check that they agree with each other."""
+
+    vocabulary = load_vocabulary(directory)
+    table = load_outcome_table(directory)
+    validate_registry_pair(vocabulary, table)
+    return vocabulary, table
+
+
+def load_outcome_vectors(directory: Path | None = None) -> dict[str, Any]:
+    """Load ``outcome-vectors.json``, the conformance cases for other languages."""
+
+    return _load_json(directory, VECTORS_FILE, VECTORS_SCHEMA)
+
+
 def _flags(case_sensitive: object) -> int:
     if not isinstance(case_sensitive, bool):
         raise RegistryError("case_sensitive must be true or false")
@@ -193,7 +223,9 @@ def validate_vocabulary(vocabulary: dict[str, Any]) -> None:
             raise RegistryError(f"term {term_id} names unknown result {term['result']!r}")
         for variant in term.get("technical", []):
             if variant.get("min_level") not in LEVELS[1:]:
-                raise RegistryError(f"{term_id}/{variant.get('term')}: min_level must be detail or engineering")
+                raise RegistryError(
+                    f"{term_id}/{variant.get('term')}: min_level must be detail or engineering"
+                )
             if variant.get("severity") not in SEVERITIES:
                 raise RegistryError(f"{term_id}/{variant.get('term')}: severity must be error or warn")
             try:
@@ -231,19 +263,38 @@ def _check_row(where: str, row: object) -> None:
     if safe and may:
         raise RegistryError(f"{where}: safe_to_retry needs may_have_changed=false")
     if result in NO_CHANGE_RESULTS and may:
-        raise RegistryError(f"{where}: {result} claims nothing changed, so may_have_changed must be false")
+        raise RegistryError(
+            f"{where}: {result} claims nothing changed, so may_have_changed must be false"
+        )
     if result in MAY_CHANGE_RESULTS and (not may or safe):
-        raise RegistryError(f"{where}: {result} must keep may_have_changed=true and safe_to_retry=false")
+        raise RegistryError(
+            f"{where}: {result} must keep may_have_changed=true and safe_to_retry=false"
+        )
     if "if_not_dispatched" in row:
         _check_row(f"{where}.if_not_dispatched", row["if_not_dispatched"])
+
+
+def _rows(table: dict[str, Any]) -> Iterator[tuple[str, dict[str, Any]]]:
+    """Every result row in the table, with where it lives."""
+
+    for source, spec in table["sources"].items():
+        for value, row in spec["values"].items():
+            yield f"sources.{source}.{value}", row
+            if "if_not_dispatched" in row:
+                yield f"sources.{source}.{value}.if_not_dispatched", row["if_not_dispatched"]
+    for name, row in table["fallbacks"].items():
+        yield f"fallbacks.{name}", row
 
 
 def validate_outcome_table(table: dict[str, Any]) -> None:
     results = table.get("results")
     if not isinstance(results, dict) or tuple(results) != RESULTS:
         raise RegistryError(f"results must list {RESULTS} in order")
-    if set(table.get("proof", {})) != {"sealed", "local", "none"}:
-        raise RegistryError("proof must define sealed, local, and none")
+    for result, spec in results.items():
+        if not isinstance(spec, dict) or not spec.get("label") or not spec.get("meaning"):
+            raise RegistryError(f"results.{result} needs a label and a meaning")
+    if tuple(table.get("proof", {})) != PROOFS:
+        raise RegistryError(f"proof must define {PROOFS} in order")
     sources = table.get("sources")
     precedence = table.get("precedence")
     tiers = table.get("tiers")
@@ -251,26 +302,30 @@ def validate_outcome_table(table: dict[str, Any]) -> None:
         raise RegistryError("sources and precedence are required")
     if set(precedence) != set(sources) or len(precedence) != len(sources):
         raise RegistryError("precedence must name every source once")
-    flat = [source for tier in tiers or [] for source in tier]
-    if sorted(flat) != sorted(precedence):
-        raise RegistryError("tiers must name every source once")
+    if not isinstance(tiers, list) or not all(isinstance(tier, list) and tier for tier in tiers):
+        raise RegistryError("tiers must be a list of non-empty lists")
+    flat = [source for tier in tiers for source in tier]
+    if flat != precedence:
+        raise RegistryError("tiers must name every source once, in precedence order")
     for source, spec in sources.items():
         values = spec.get("values") if isinstance(spec, dict) else None
         if not isinstance(values, dict) or not values:
             raise RegistryError(f"sources.{source}.values is required")
-        for value, row in values.items():
-            _check_row(f"sources.{source}.{value}", row)
-    for value, row in sources["transaction_outcome"]["values"].items():
-        allowed = row.get("execution_outcomes")
-        coarse = set(sources["execution_outcome"]["values"])
-        if not isinstance(allowed, list) or not allowed or not set(allowed) <= coarse:
-            raise RegistryError(f"sources.transaction_outcome.{value}.execution_outcomes is invalid")
-    for name, row in table.get("fallbacks", {}).items():
-        _check_row(f"fallbacks.{name}", row)
+        if not isinstance(spec.get("meaning"), str) or not spec["meaning"]:
+            raise RegistryError(f"sources.{source} needs a meaning")
+    fallbacks = table.get("fallbacks")
+    if not isinstance(fallbacks, dict) or tuple(sorted(fallbacks)) != tuple(sorted(FALLBACKS)):
+        raise RegistryError(f"fallbacks must define {FALLBACKS}")
+    for where, row in _rows(table):
+        _check_row(where, row)
+    for name, row in fallbacks.items():
         if row["result"] != "check_the_record":
             raise RegistryError(f"fallbacks.{name} must fail closed to check_the_record")
-    if set(table.get("fallbacks", {})) != {"conflict", "unrecognized", "missing", "delivery_uncertain"}:
-        raise RegistryError("fallbacks must define conflict, unrecognized, missing, and delivery_uncertain")
+    coarse = set(sources.get("execution_outcome", {}).get("values", {}))
+    for value, row in sources.get("transaction_outcome", {}).get("values", {}).items():
+        allowed = row.get("execution_outcomes")
+        if not isinstance(allowed, list) or not allowed or not set(allowed) <= coarse:
+            raise RegistryError(f"sources.transaction_outcome.{value}.execution_outcomes is invalid")
     for kind in ("in_progress", "not_an_outcome"):
         for source, values in table.get(kind, {}).items():
             if source not in sources:
@@ -278,6 +333,51 @@ def validate_outcome_table(table: dict[str, Any]) -> None:
             overlap = set(values) & set(sources[source]["values"])
             if overlap:
                 raise RegistryError(f"{kind}.{source} repeats mapped values {sorted(overlap)}")
+    for source, states in table.get("in_progress", {}).items():
+        for state, spec in states.items():
+            if not isinstance(spec, dict) or not spec.get("label") or not spec.get("next_action"):
+                raise RegistryError(f"in_progress.{source}.{state} needs a label and a next_action")
+    for emitter in table.get("emitters", []):
+        if emitter.get("source") not in sources:
+            raise RegistryError(f"emitter {emitter.get('symbol')!r} names unknown source")
+        if not emitter.get("repository") or not emitter.get("symbol") or not emitter.get("read_at"):
+            raise RegistryError("every emitter needs a repository, a symbol, and read_at")
+        if not isinstance(emitter.get("values"), list) or not emitter["values"]:
+            raise RegistryError(f"emitter {emitter['symbol']!r} needs its values")
+
+
+def validate_registry_pair(vocabulary: dict[str, Any], table: dict[str, Any]) -> None:
+    """The two files must use one label per result, and the words must hold.
+
+    * A vocabulary term that names a result uses that result's label, and every
+      result has such a term.
+    * A row that may have changed something never carries a no-change claim.
+    """
+
+    named: dict[str, str] = {}
+    for term in vocabulary["terms"]:
+        result = term.get("result")
+        if result is None:
+            continue
+        if result in named:
+            raise RegistryError(f"result {result} has two vocabulary terms")
+        named[result] = term["business_term"]
+    for result in RESULTS:
+        label = table["results"][result]["label"]
+        if named.get(result) != label:
+            raise RegistryError(
+                f"vocabulary.json calls {result} {named.get(result)!r}, outcomes.json calls it {label!r}"
+            )
+    claims = [re.compile(p, re.IGNORECASE) for p in vocabulary["no_change_claims"]["claim_patterns"]]
+    for where, row in _rows(table):
+        if not row["may_have_changed"]:
+            continue
+        for claim in claims:
+            match = claim.search(row["next_action"])
+            if match:
+                raise RegistryError(
+                    f"{where}: may have changed something but next_action says {match.group(0)!r}"
+                )
 
 
 def known_values(table: dict[str, Any], source: str) -> set[str]:
@@ -393,10 +493,16 @@ def _json_fragments(text: str) -> Iterator[Fragment]:
             for item in value.values():
                 yield from strings(item)
 
+    cursor = 0
     for value in strings(document):
         if not re.search(r"\s", value.strip()):
             continue
-        offset = text.find(json.dumps(value)[1:-1])
+        encoded = json.dumps(value)[1:-1]
+        offset = text.find(encoded, cursor)
+        if offset < 0:
+            offset = text.find(encoded)
+        else:
+            cursor = offset + len(encoded)
         line = text.count("\n", 0, offset) + 1 if offset >= 0 else 1
         yield Fragment(line, value)
 
@@ -404,8 +510,8 @@ def _json_fragments(text: str) -> Iterator[Fragment]:
 def _scan_script(text: str) -> tuple[list[tuple[int, str, str]], str]:
     """Split JS or TS into string literals and code with literals blanked.
 
-    A heuristic tokenizer, not a parser. It is good enough to find prose and
-    to keep identifiers, imports, and class names out of the term check.
+    A heuristic tokenizer, not a parser. It's good enough to find prose and to
+    keep identifiers, imports, and class names out of the term check.
     """
 
     literals: list[tuple[int, str, str]] = []
@@ -521,7 +627,13 @@ def _pragmas(path: str, lines: Sequence[str]) -> tuple[dict[int, set[str]], list
         names = {name.strip().lower() for name in match.group("names").split(",") if name.strip()}
         if not names or not match.group("reason"):
             problems.append(
-                Finding(path, number, "pragma", "error", "vocab-allow needs a term and a reason: vocab-allow: <term> -- <reason>")
+                Finding(
+                    path,
+                    number,
+                    "pragma",
+                    "error",
+                    "vocab-allow needs a term and a reason: vocab-allow: <term> -- <reason>",
+                )
             )
             continue
         for target in (number, number + 1):
@@ -572,7 +684,11 @@ def check_terms(
     *,
     exclude: Sequence[str] = (),
 ) -> list[Finding]:
-    """Flag technical terms that are too deep for ``level``."""
+    """Flag technical terms that are too deep for ``level``.
+
+    One stretch of text gets one finding: when two terms match overlapping
+    text (for example "governed repair" and "governed"), the longer one wins.
+    """
 
     rules = term_rules(vocabulary, level)
     findings: list[Finding] = []
@@ -588,10 +704,23 @@ def check_terms(
         for fragment in extract_fragments(path, text):
             if fragment.line in skipped:
                 continue
-            for rule in rules:
-                match = rule.pattern.search(fragment.text)
-                if not match or _allowed(allowed, fragment.line, rule.term_id, rule.term):
+            hits = [
+                (match, rule)
+                for rule in rules
+                for match in rule.pattern.finditer(fragment.text)
+                if not _allowed(allowed, fragment.line, rule.term_id, rule.term)
+            ]
+            hits.sort(key=lambda hit: (hit[0].start(), -(hit[0].end() - hit[0].start())))
+            taken: list[tuple[int, int]] = []
+            reported: set[tuple[str, str]] = set()
+            for match, rule in hits:
+                span = match.span()
+                if any(start <= span[0] and span[1] <= end for start, end in taken):
                     continue
+                taken.append(span)
+                if (rule.term_id, rule.term) in reported:
+                    continue
+                reported.add((rule.term_id, rule.term))
                 findings.append(
                     Finding(
                         str(path),
@@ -648,17 +777,50 @@ def check_claims(
     return findings
 
 
+def _values_of(annotation: object) -> list[str]:
+    """String values a Literal, an Enum, or a union of them can take."""
+
+    if isinstance(annotation, type) and issubclass(annotation, enum.Enum):
+        return [str(member.value) for member in annotation]
+    origin = typing.get_origin(annotation)
+    if origin is typing.Literal:
+        values: list[str] = []
+        for arg in typing.get_args(annotation):
+            values.extend(_values_of(arg) if isinstance(arg, enum.Enum) else [str(arg)])
+        return values
+    if isinstance(annotation, enum.Enum):
+        return [str(annotation.value)]
+    if origin is not None:
+        values = []
+        for arg in typing.get_args(annotation):
+            if arg is type(None):
+                continue
+            values.extend(_values_of(arg))
+        return values
+    return []
+
+
 def _import_enum_values(spec: str) -> tuple[str, list[str]]:
     target, _, source = spec.partition("=")
     module_name, _, attribute = target.partition(":")
     if not (module_name and attribute and source):
-        raise ValueError(f"--enum takes MODULE:CLASS=SOURCE, not {spec!r}")
-    module = importlib.import_module(module_name)
-    enum_cls = module
-    for part in attribute.split("."):
-        enum_cls = getattr(enum_cls, part)
-    values = [str(getattr(member, "value", member)) for member in enum_cls]
-    return source, values
+        raise ValueError(f"--enum takes MODULE:ATTRIBUTE=SOURCE, not {spec!r}")
+    obj: object = importlib.import_module(module_name)
+    parts = attribute.split(".")
+    for index, part in enumerate(parts):
+        try:
+            obj = getattr(obj, part)
+            continue
+        except AttributeError:
+            fields = getattr(obj, "model_fields", None)
+            if index == len(parts) - 1 and isinstance(fields, dict) and part in fields:
+                obj = fields[part].annotation
+                continue
+            raise
+    values = _values_of(obj)
+    if not values:
+        raise ValueError(f"{target} is not an Enum, a Literal, or a field that holds them")
+    return source, list(dict.fromkeys(values))
 
 
 def check_coverage(
@@ -680,7 +842,9 @@ def check_coverage(
         try:
             known = known_values(table, source)
         except KeyError:
-            raise ValueError(f"{where}: unknown source {source!r}; known sources: {sorted(table['sources'])}") from None
+            raise ValueError(
+                f"{where}: unknown source {source!r}; known sources: {sorted(table['sources'])}"
+            ) from None
         for value in members:
             if value not in known:
                 findings.append(
@@ -694,7 +858,13 @@ def check_coverage(
                 )
         for value in sorted(known - set(members)):
             findings.append(
-                Finding(where, 0, "coverage", "warn", f"outcomes.json maps {source}={value!r}, which the enum no longer has.")
+                Finding(
+                    where,
+                    0,
+                    "coverage",
+                    "warn",
+                    f"outcomes.json maps {source}={value!r}, which this emitter doesn't have.",
+                )
             )
     return findings
 
@@ -720,19 +890,36 @@ def _glob(root: Path, patterns: Sequence[str]) -> list[Path]:
 
 
 def check_config(config_path: Path, vocabulary: dict[str, Any], table: dict[str, Any]) -> list[Finding]:
-    """Run every rule a ``.vocab.json`` file asks for."""
+    """Run every rule a ``.vocab.json`` file asks for.
 
-    config = json.loads(config_path.read_text(encoding="utf-8"))
+    Shape::
+
+        {"levels": {"business": ["README.md", "site/pages/*.tsx"],
+                    "detail": ["docs/guides/**/*.md"]},
+         "claims": ["src", "docs"],
+         "exclude": ["*/vendor/*"],
+         "coverage": {"enums": ["pkg.mod:Outcome=transaction_outcome"],
+                      "values": {"agent_status": ["success", "halt"]}}}
+    """
+
+    try:
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError as exc:
+        raise ValueError(f"{config_path} is not JSON: {exc}") from exc
     root = config_path.resolve().parent
     exclude = list(config.get("exclude", []))
     findings: list[Finding] = []
     for level, patterns in config.get("levels", {}).items():
+        if level not in LEVELS[:2]:
+            raise ValueError(f"{config_path}: level {level!r} must be business or detail")
         findings.extend(check_terms(_glob(root, patterns), level, vocabulary, exclude=exclude))
     if config.get("claims"):
         findings.extend(check_claims(_glob(root, config["claims"]), vocabulary, exclude=exclude))
     coverage = config.get("coverage", {})
     if coverage:
-        findings.extend(check_coverage(table, enums=coverage.get("enums", []), values=coverage.get("values")))
+        findings.extend(
+            check_coverage(table, enums=coverage.get("enums", []), values=coverage.get("values"))
+        )
     return findings
 
 
@@ -751,9 +938,11 @@ def _report(findings: Sequence[Finding], output: str, strict: bool) -> int:
     return 1 if errors or (strict and warnings) else 0
 
 
-def main(argv: Sequence[str] | None = None) -> int:
+def build_parser() -> argparse.ArgumentParser:
     common = argparse.ArgumentParser(add_help=False)
-    common.add_argument("--registry", type=Path, help="directory with vocabulary.json and outcomes.json")
+    common.add_argument(
+        "--registry", type=Path, help="directory with vocabulary.json and outcomes.json"
+    )
     common.add_argument("--strict", action="store_true", help="exit 1 on warnings too")
     common.add_argument("--format", choices=("text", "json"), default="text", dest="output")
     common.add_argument("--exclude", action="append", default=[], help="glob of paths to skip")
@@ -763,28 +952,37 @@ def main(argv: Sequence[str] | None = None) -> int:
         description="Check user-facing text against the OpenAdapt vocabulary registry.",
     )
     commands = parser.add_subparsers(dest="command", required=True)
-    terms = commands.add_parser("terms", parents=[common], help="technical terms too deep for a surface level")
+    terms = commands.add_parser(
+        "terms", parents=[common], help="technical terms too deep for a surface level"
+    )
     terms.add_argument("--level", choices=LEVELS[:2], required=True)
     terms.add_argument("paths", nargs="+", type=Path)
-    claims = commands.add_parser("claims", parents=[common], help="no-change claims a halt alone can't support")
+    claims = commands.add_parser(
+        "claims", parents=[common], help="no-change claims a halt alone can't support"
+    )
     claims.add_argument("paths", nargs="+", type=Path)
-    coverage = commands.add_parser("coverage", parents=[common], help="every outcome value maps to a plain result")
-    coverage.add_argument("--enum", action="append", default=[], metavar="MODULE:CLASS=SOURCE")
+    coverage = commands.add_parser(
+        "coverage", parents=[common], help="every outcome value maps to a plain result"
+    )
+    coverage.add_argument("--enum", action="append", default=[], metavar="MODULE:ATTRIBUTE=SOURCE")
     coverage.add_argument("--values", action="append", default=[], metavar="SOURCE=V1,V2")
     check = commands.add_parser("check", parents=[common], help="run what a .vocab.json file asks for")
     check.add_argument("--config", type=Path, required=True)
+    return parser
 
+
+def main(argv: Sequence[str] | None = None) -> int:
+    parser = build_parser()
     args = parser.parse_args(argv)
+    if args.command == "coverage" and not args.enum and not args.values:
+        parser.error("coverage needs --enum or --values")
     try:
-        vocabulary = load_vocabulary(args.registry)
-        table = load_outcome_table(args.registry)
+        vocabulary, table = load_registry(args.registry)
         if args.command == "terms":
             findings = check_terms(args.paths, args.level, vocabulary, exclude=args.exclude)
         elif args.command == "claims":
             findings = check_claims(args.paths, vocabulary, exclude=args.exclude)
         elif args.command == "coverage":
-            if not args.enum and not args.values:
-                parser.error("coverage needs --enum or --values")
             findings = check_coverage(table, enums=args.enum, values=_parse_values(args.values))
         else:
             findings = check_config(args.config, vocabulary, table)

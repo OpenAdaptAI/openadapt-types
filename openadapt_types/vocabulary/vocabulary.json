@@ -1,12 +1,12 @@
 {
   "schema_version": "openadapt.vocabulary/v1",
-  "updated": "2026-10-08",
+  "updated": "2026-10-09",
   "_about": [
     "One plain term per concept for business-facing surfaces, with the exact technical term kept one level deeper.",
     "min_level is the shallowest level where a technical term may appear. A term never moves off engineering surfaces.",
     "severity error marks the terms that must never reach a business-facing first screen. severity warn marks the rest.",
     "Patterns use syntax that Python re and JavaScript RegExp both accept. case_sensitive false means the i flag.",
-    "openadapt_types.vocabulary.lint reads this file. The outcome labels must match outcomes.json."
+    "openadapt_types.vocabulary.lint reads this file and checks that every term with a result uses the same label as outcomes.json."
   ],
   "levels": [
     {
@@ -36,14 +36,7 @@
     {
       "id": "engineering",
       "meaning": "Reference and evidence for engineers and auditors. Every term may appear here.",
-      "examples": [
-        "reference docs",
-        "evidence views",
-        "report.json",
-        "API fields",
-        "the openadapt flow CLI",
-        "code"
-      ]
+      "examples": ["reference docs", "evidence views", "report.json", "API fields", "the openadapt flow CLI", "code"]
     }
   ],
   "terms": [
@@ -98,7 +91,8 @@
       "result": "stopped_before_change",
       "meaning": "Something didn't match, so it stopped before changing anything and asked a person. Nothing was written.",
       "technical": [
-        {"term": "HALTED_BEFORE_EFFECT", "pattern": "\\bHALTED_BEFORE_EFFECT\\b", "case_sensitive": true, "min_level": "detail", "severity": "warn"},
+        {"term": "HALTED_BEFORE_EFFECT", "pattern": "\\bHALTED_BEFORE_EFFECT\\b", "case_sensitive": false, "min_level": "detail", "severity": "error"},
+        {"term": "CANCELED", "pattern": "\\bCANCELED\\b", "case_sensitive": true, "min_level": "detail", "severity": "error"},
         {"term": "HALTED", "pattern": "\\bHALT(ED|S)?\\b", "case_sensitive": true, "min_level": "detail", "severity": "error"}
       ]
     },
@@ -108,7 +102,8 @@
       "result": "check_the_record",
       "meaning": "A save may have gone through. A person checks the record before anything is retried.",
       "technical": [
-        {"term": "RECONCILIATION_REQUIRED", "pattern": "\\bRECONCILIATION_REQUIRED\\b", "case_sensitive": true, "min_level": "detail", "severity": "error"},
+        {"term": "RECONCILIATION_REQUIRED", "pattern": "\\bRECONCILIATION_REQUIRED\\b", "case_sensitive": false, "min_level": "detail", "severity": "error"},
+        {"term": "ROLLED_BACK", "pattern": "\\bROLLED_BACK(_VERIFIED)?\\b", "case_sensitive": false, "min_level": "detail", "severity": "error"},
         {"term": "reconciliation", "pattern": "\\breconcil(e|es|ed|ing|iation)\\b", "case_sensitive": false, "min_level": "detail", "severity": "warn"}
       ]
     },
@@ -118,7 +113,7 @@
       "result": "finished_not_checked",
       "meaning": "It did the steps but didn't confirm the saved result.",
       "technical": [
-        {"term": "COMPLETED_UNVERIFIED", "pattern": "\\bCOMPLETED_UNVERIFIED\\b", "case_sensitive": true, "min_level": "detail", "severity": "warn"}
+        {"term": "COMPLETED_UNVERIFIED", "pattern": "\\bCOMPLETED_UNVERIFIED\\b", "case_sensitive": false, "min_level": "detail", "severity": "error"}
       ]
     },
     {
@@ -127,17 +122,17 @@
       "result": "did_not_finish",
       "meaning": "It couldn't complete the task. The next step says what's known about whether anything was written.",
       "technical": [
-        {"term": "FAILED_PLATFORM", "pattern": "\\bFAILED_PLATFORM\\b", "case_sensitive": true, "min_level": "detail", "severity": "warn"},
-        {"term": "FAILED", "pattern": "\\bFAILED\\b", "case_sensitive": true, "min_level": "detail", "severity": "warn"}
+        {"term": "FAILED_PLATFORM", "pattern": "\\bFAILED_PLATFORM\\b", "case_sensitive": false, "min_level": "detail", "severity": "error"},
+        {"term": "FAILED", "pattern": "\\bFAILED\\b", "case_sensitive": true, "min_level": "detail", "severity": "error"}
       ]
     },
     {
       "id": "refused",
-      "business_term": "Refused",
+      "business_term": "Blocked before saving",
       "result": "refused",
-      "meaning": "A rule, an approval, or the right-record check didn't allow the run, so it changed nothing.",
+      "meaning": "A rule, an approval, or the right-record check blocked the run before it saved anything. Nothing was written.",
       "technical": [
-        {"term": "REJECTED_POLICY", "pattern": "\\bREJECTED_POLICY\\b", "case_sensitive": true, "min_level": "detail", "severity": "warn"}
+        {"term": "REJECTED_POLICY", "pattern": "\\bREJECTED_POLICY\\b", "case_sensitive": false, "min_level": "detail", "severity": "error"}
       ]
     },
     {
@@ -166,6 +161,7 @@
       "business_term": "approved fix",
       "meaning": "When a screen changes, OpenAdapt proposes a fix and a person approves it.",
       "technical": [
+        {"term": "governed repair", "pattern": "\\bgoverned\\s+repairs?\\b", "case_sensitive": false, "min_level": "detail", "severity": "error"},
         {"term": "repair candidate", "pattern": "\\brepair\\s+candidates?\\b", "case_sensitive": false, "min_level": "detail", "severity": "warn"}
       ]
     },
@@ -316,7 +312,7 @@
       "\\bsafe\\s+to\\s+(re-?run|retry|try\\s+again|run\\s+(it\\s+|this\\s+)?again)\\b",
       "\\b(record|chart|entry)\\s+(is|was|stays|stayed|remains|remained)\\s+unchanged\\b"
     ],
-    "stop_context": "\\bhalt(s|ed|ing)?\\b|\\bstop(s|ped|ping)?\\b",
+    "stop_context": "\\bhalt(s|ed|ing)?\\b|\\bstop(s|ped|ping)?\\b|\\bfail(s|ed|ure|ures)?\\b|\\berrors?\\b|\\btime[ds]?[- ]?out\\b|\\bcancel+(s|ed|ing)?\\b|\\babort(s|ed|ing)?\\b",
     "proof_tokens": "\\b(HALTED_BEFORE_EFFECT|halted_before_effect|REJECTED_POLICY|rejected_policy|CANCELED|FAILED_PLATFORM|failed_platform|stopped_before_change|may_have_changed|plain_outcome)\\b",
     "window_lines": 3
   }
