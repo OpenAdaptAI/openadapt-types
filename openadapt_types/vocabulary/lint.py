@@ -120,8 +120,12 @@ _SKIPPED_DIRS = {
     ".next",
     ".pytest_cache",
 }
+# Names hold only the characters a term id, a term, or a rule uses. That keeps
+# this pattern's own source, and any code that mentions the pragma, from
+# reading as a malformed pragma when a repository lints a vendored copy.
 _PRAGMA = re.compile(
-    r"vocab-allow:\s*(?P<names>[^\n]*?)(?:\s+--\s+(?P<reason>\S[^\n]*?))?\s*(?:\*/|-->)?\s*$"
+    r"vocab-allow:[ \t]*(?P<names>[\w ,.+'-]*?)"
+    r"(?:\s+--\s+(?P<reason>\S[^\n]*?))?\s*(?:\*/|-->)?\s*$"
 )
 _ADVANCED_START = re.compile(r"vocab:\s*advanced\b")
 _ADVANCED_END = re.compile(r"vocab:\s*end\b")

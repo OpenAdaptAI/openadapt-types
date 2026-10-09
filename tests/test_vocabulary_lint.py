@@ -510,6 +510,17 @@ def test_a_copied_vocabulary_directory_runs_without_this_package(tmp_path: Path)
     assert "term:computer_that_runs_it" in result.stdout
 
 
+def test_a_vendored_copy_passes_the_claims_check_it_ships() -> None:
+    # Repositories copy this directory into their tree and then run
+    # `claims src`. The copy itself must not fail that run.
+    assert check_claims([REGISTRY_DIR], VOCABULARY) == []
+
+
+def test_text_that_only_mentions_the_pragma_is_not_a_pragma(tmp_path: Path) -> None:
+    page = _write(tmp_path, "notes.py", 'PATTERN = r"vocab-allow:\\s*(?P<names>.*)"\n')
+    assert check_claims([page], VOCABULARY) == []
+
+
 def test_the_module_runs_with_python_dash_m(tmp_path: Path) -> None:
     page = _write(tmp_path, "page.md", "Each run ends Done and checked.\n")
     result = subprocess.run(
