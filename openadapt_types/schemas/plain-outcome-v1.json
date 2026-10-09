@@ -106,6 +106,19 @@
           "default": null,
           "title": "Execution Outcome"
         },
+        "overlay_phase": {
+          "anyOf": [
+            {
+              "pattern": "^[A-Za-z][A-Za-z0-9_]{0,63}$",
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Overlay Phase"
+        },
         "program_terminal_state": {
           "anyOf": [
             {
@@ -199,7 +212,7 @@
       "type": "string"
     },
     "technical_code": {
-      "pattern": "^(transaction_outcome|execute_terminal_outcome|execute_state|execution_outcome|agent_status|connector_status|clinic_tool_status|program_terminal_state|fallback)=[A-Za-z][A-Za-z0-9_]{0,63}$",
+      "pattern": "^(transaction_outcome|execute_terminal_outcome|execute_state|execution_outcome|agent_status|connector_status|clinic_tool_status|program_terminal_state|overlay_phase|fallback)=[A-Za-z][A-Za-z0-9_]{0,63}$",
       "title": "Technical Code",
       "type": "string"
     }

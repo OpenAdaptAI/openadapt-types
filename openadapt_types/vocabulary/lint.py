@@ -376,10 +376,21 @@ def validate_outcome_table(table: dict[str, Any]) -> None:
             overlap = set(values) & set(sources[source]["values"])
             if overlap:
                 raise RegistryError(f"{kind}.{source} repeats mapped values {sorted(overlap)}")
+    # Execute states carry the progress labels. Every other source's
+    # in-progress value names the Execute state it reads as, so all surfaces
+    # share three progress labels.
+    progress_states = table.get("in_progress", {}).get("execute_state", {})
     for source, states in table.get("in_progress", {}).items():
-        for state, spec in states.items():
-            if not isinstance(spec, dict) or not spec.get("label") or not spec.get("next_action"):
-                raise RegistryError(f"in_progress.{source}.{state} needs a label and a next_action")
+        for value, spec in states.items():
+            if not isinstance(spec, dict):
+                raise RegistryError(f"in_progress.{source}.{value} must be an object")
+            if source == "execute_state":
+                if not spec.get("label") or not spec.get("next_action"):
+                    raise RegistryError(f"in_progress.{source}.{value} needs a label and a next_action")
+            elif spec.get("state") not in progress_states:
+                raise RegistryError(
+                    f"in_progress.{source}.{value} must name an in_progress.execute_state entry as its state"
+                )
     for emitter in table.get("emitters", []):
         if emitter.get("source") not in sources:
             raise RegistryError(f"emitter {emitter.get('symbol')!r} names unknown source")

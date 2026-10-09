@@ -66,7 +66,8 @@ _CODE = re.compile(r"^[A-Za-z][A-Za-z0-9_]{0,63}$")
 _CODE_PATTERN = _CODE.pattern
 _TECHNICAL_CODE_PATTERN = (
     r"^(transaction_outcome|execute_terminal_outcome|execute_state|execution_outcome"
-    r"|agent_status|connector_status|clinic_tool_status|program_terminal_state|fallback)"
+    r"|agent_status|connector_status|clinic_tool_status|program_terminal_state|overlay_phase"
+    r"|fallback)"
     r"=[A-Za-z][A-Za-z0-9_]{0,63}$"
 )
 
@@ -106,6 +107,7 @@ class OutcomeSourceV1(str, Enum):
     CONNECTOR_STATUS = "connector_status"
     CLINIC_TOOL_STATUS = "clinic_tool_status"
     PROGRAM_TERMINAL_STATE = "program_terminal_state"
+    OVERLAY_PHASE = "overlay_phase"
 
 
 class _StrictContract(BaseModel):
@@ -127,6 +129,7 @@ class PlainOutcomeInputsV1(_StrictContract):
     connector_status: StrictStr | None = Field(default=None, pattern=_CODE_PATTERN)
     clinic_tool_status: StrictStr | None = Field(default=None, pattern=_CODE_PATTERN)
     program_terminal_state: StrictStr | None = Field(default=None, pattern=_CODE_PATTERN)
+    overlay_phase: StrictStr | None = Field(default=None, pattern=_CODE_PATTERN)
     dispatched: StrictBool | None = None
     delivery_uncertain: StrictBool | None = None
 
@@ -232,6 +235,19 @@ def _normalize(value: object) -> str | _Unrecognized | None:
     return _MALFORMED
 
 
+def _progress_state(table: Mapping[str, Any], source: str, value: str) -> str:
+    """The Execute progress state that an in-progress value reads as.
+
+    Execute states name themselves. Any other source's in-progress entry
+    names the Execute state it reads as, so every surface shows the same
+    three progress labels.
+    """
+
+    if source == OutcomeSourceV1.EXECUTE_STATE.value:
+        return value
+    return table["in_progress"][source][value]["state"]
+
+
 def _flag(name: str, value: object) -> bool | None:
     if value is not None and not isinstance(value, bool):
         raise TypeError(f"{name} must be True, False, or None, not {type(value).__name__}")
@@ -297,7 +313,7 @@ def _resolve(
     tier = next(tier for tier in table["tiers"] if any(source in present for source in tier))
 
     rows: list[tuple[str, str, Mapping[str, Any]]] = []
-    progress: list[str] = []
+    progress: list[tuple[str, str]] = []
     for source in tier:
         value = present.get(source)
         if value is None:
@@ -306,7 +322,7 @@ def _resolve(
         if not isinstance(value, str):
             return fallback("unrecognized")
         if value in table.get("in_progress", {}).get(source, {}):
-            progress.append(value)
+            progress.append((source, value))
             continue
         row = table["sources"][source]["values"].get(value)
         if row is None:
@@ -329,13 +345,14 @@ def _resolve(
     if progress:
         if rows or len(progress) > 1:
             return fallback("conflict")
-        state = progress[0]
+        source, value = progress[0]
+        state = _progress_state(table, source, value)
         spec = table["in_progress"]["execute_state"][state]
         return PlainProgressV1(
             state=state,
             label=spec["label"],
             next_action=spec["next_action"],
-            technical_code=f"execute_state={state}",
+            technical_code=f"{source}={value}",
         )
 
     # Rules 7 and 8.
@@ -362,6 +379,7 @@ def plain_outcome(
     connector_status: str | Enum | None = None,
     clinic_tool_status: str | Enum | None = None,
     program_terminal_state: str | Enum | None = None,
+    overlay_phase: str | Enum | None = None,
     dispatched: bool | None = None,
     delivery_uncertain: bool | None = None,
     proof: PlainProofV1 | str | None = None,
@@ -371,7 +389,8 @@ def plain_outcome(
     Pass every value you have. The precise ones (``transaction_outcome``,
     ``execute_terminal_outcome``) decide when present; coarse ones decide only
     when nothing more precise came back, and then never claim that nothing
-    changed.
+    changed. ``overlay_phase`` is the phase on a control overlay frame; its
+    end phases mirror the coarse ``execution_outcome``.
 
     ``dispatched`` is ``False`` only when you know the request never reached
     the app (for example, a timeout before the run started). ``True`` and
@@ -379,8 +398,9 @@ def plain_outcome(
     "Check the record". ``proof`` says what backs the result and defaults to
     ``none``.
 
-    Raises :class:`PlainOutcomeInProgress` when the only input is an Execute
-    state that hasn't ended (queued, running, or waiting for a person).
+    Raises :class:`PlainOutcomeInProgress` when the deciding input says the
+    run hasn't ended: an Execute state such as queued, running, or waiting
+    for a person, or an overlay phase such as executing or paused.
     """
 
     resolved = _resolve(
@@ -393,6 +413,7 @@ def plain_outcome(
             "connector_status": connector_status,
             "clinic_tool_status": clinic_tool_status,
             "program_terminal_state": program_terminal_state,
+            "overlay_phase": overlay_phase,
         },
         dispatched=dispatched,
         delivery_uncertain=delivery_uncertain,

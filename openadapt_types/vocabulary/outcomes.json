@@ -91,6 +91,20 @@
       "symbol": "src/openadapt_agent/runner.py RunOutcome.status",
       "read_at": "origin/main 88b1dbd, read 2026-10-09",
       "values": ["success", "halt", "refused", "timeout", "error"]
+    },
+    {
+      "source": "overlay_phase",
+      "repository": "OpenAdaptAI/openadapt-types",
+      "symbol": "openadapt_types/control_overlay.py ControlOverlayPhase (control_overlay.py ControlOverlayFrameV1.phase and control_overlay_tracking.py ControlOverlayFrameV2.phase)",
+      "read_at": "origin/main 07b8b0c, read 2026-10-09",
+      "values": ["idle", "observing", "recording", "executing", "pausing", "paused", "resuming", "stopping", "verifying", "verified", "completed_unverified", "halted", "failed", "rolled_back"]
+    },
+    {
+      "source": "overlay_phase",
+      "repository": "OpenAdaptAI/openadapt-flow",
+      "symbol": "openadapt_flow/runtime/control_overlay.py RuntimeControlOverlayEmitter. emit_terminal maps RunReport.execution_outcome one to one onto the five end phases; runtime/replayer.py emits observing, executing, and verifying during a run.",
+      "read_at": "origin/main 6e4e4ed0, read 2026-10-09",
+      "values": ["observing", "executing", "verifying", "verified", "completed_unverified", "halted", "failed", "rolled_back"]
     }
   ],
   "not_run_outcomes": [
@@ -154,10 +168,10 @@
   "merge_rules": [
     "1. Ignore any input whose value is listed in not_an_outcome for its source.",
     "2. Use only the first tier in tiers that still has an input. Ignore the lower tiers, except for rule 4.",
-    "3. Each input in that tier selects one row from sources.<source>.values. An execute_state value listed in in_progress selects no row and marks the run as still in progress. A value with no row selects fallbacks.unrecognized and ends the merge.",
+    "3. Each input in that tier selects one row from sources.<source>.values. A value listed under in_progress.<source> selects no row and marks the run as still in progress. A value with no row selects fallbacks.unrecognized and ends the merge.",
     "4. When transaction_outcome and execution_outcome are both present, execution_outcome must appear in that transaction row's execution_outcomes list. Otherwise use fallbacks.conflict.",
     "5. A row with if_not_dispatched uses that variant only when the caller states dispatched=false.",
-    "6. If the tier marks the run as in progress and selects no row, there's no result yet: report in_progress.execute_state.<value>. If it also selects a row, use fallbacks.conflict.",
+    "6. If the tier marks the run as in progress and selects no row, there's no result yet: report in_progress.execute_state.<state>. For an execute_state input, <state> is the value itself. For any other source, it's the state that the value's in_progress entry names. If the tier also selects a row, or marks the run as in progress twice, use fallbacks.conflict.",
     "7. Rows that agree on result: use the most cautious row, which is the first in precedence order with may_have_changed=true, else the first with safe_to_retry=false, else the first.",
     "8. Rows that disagree on result: if every row has may_have_changed=false, use the first in precedence order. Otherwise use fallbacks.conflict.",
     "9. delivery_uncertain=true turns any result except check_the_record into fallbacks.delivery_uncertain.",
@@ -172,12 +186,13 @@
     "agent_status",
     "connector_status",
     "clinic_tool_status",
-    "program_terminal_state"
+    "program_terminal_state",
+    "overlay_phase"
   ],
   "tiers": [
     ["transaction_outcome", "execute_terminal_outcome", "execute_state"],
     ["execution_outcome"],
-    ["agent_status", "connector_status", "clinic_tool_status", "program_terminal_state"]
+    ["agent_status", "connector_status", "clinic_tool_status", "program_terminal_state", "overlay_phase"]
   ],
   "sources": {
     "transaction_outcome": {
@@ -449,6 +464,41 @@
           "next_action": "It stopped to ask a person, and this status doesn't show whether anything was saved. Check the record before anyone runs this again."
         }
       }
+    },
+    "overlay_phase": {
+      "meaning": "The phase on a control overlay frame, the on-screen status a person sees while a run goes. Its end phases mirror the coarse execution_outcome, so halted alone doesn't say whether anything was written.",
+      "values": {
+        "verified": {
+          "result": "done",
+          "may_have_changed": true,
+          "safe_to_retry": false,
+          "next_action": "Nothing else to do. OpenAdapt read the record back and it matches."
+        },
+        "completed_unverified": {
+          "result": "finished_not_checked",
+          "may_have_changed": true,
+          "safe_to_retry": false,
+          "next_action": "The steps ran, but nothing confirmed the saved result. Check the record before you count it as done or run it again."
+        },
+        "halted": {
+          "result": "check_the_record",
+          "may_have_changed": true,
+          "safe_to_retry": false,
+          "next_action": "It stopped, and this status doesn't show whether anything was saved. Check the record before anyone runs this again."
+        },
+        "failed": {
+          "result": "did_not_finish",
+          "may_have_changed": true,
+          "safe_to_retry": false,
+          "next_action": "It didn't finish, and this status doesn't show whether anything was saved. Check the record before anyone runs this again."
+        },
+        "rolled_back": {
+          "result": "check_the_record",
+          "may_have_changed": true,
+          "safe_to_retry": false,
+          "next_action": "OpenAdapt found an extra change and undid it. Check the record before anyone runs this again."
+        }
+      }
     }
   },
   "in_progress": {
@@ -465,10 +515,20 @@
         "label": "Waiting for a person",
         "next_action": "A person needs to decide before it can go on. Don't send it again."
       }
+    },
+    "overlay_phase": {
+      "observing": {"state": "running"},
+      "executing": {"state": "running"},
+      "verifying": {"state": "running"},
+      "pausing": {"state": "running"},
+      "resuming": {"state": "running"},
+      "stopping": {"state": "running"},
+      "paused": {"state": "decision_required"}
     }
   },
   "not_an_outcome": {
-    "execute_state": ["terminal"]
+    "execute_state": ["terminal"],
+    "overlay_phase": ["idle", "recording"]
   },
   "fallbacks": {
     "conflict": {

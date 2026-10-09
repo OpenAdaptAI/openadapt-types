@@ -133,9 +133,9 @@ def _registry_sentences() -> list[str]:
         sentences += [proof["label"], proof["meaning"]]
     for _, row in lint._rows(TABLE):
         sentences.append(row["next_action"])
-    for states in TABLE["in_progress"].values():
-        for state in states.values():
-            sentences += [state["label"], state["next_action"]]
+    # Other sources' in-progress values point at these Execute states.
+    for state in TABLE["in_progress"]["execute_state"].values():
+        sentences += [state["label"], state["next_action"]]
     for term in VOCABULARY["terms"]:
         sentences.append(term["meaning"])
         if term.get("business_term"):

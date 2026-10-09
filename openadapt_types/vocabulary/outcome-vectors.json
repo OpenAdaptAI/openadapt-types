@@ -609,6 +609,63 @@
       }
     },
     {
+      "name": "overlay shows a halt and nothing more precise came back",
+      "rule": "row",
+      "input": {
+        "overlay_phase": "halted"
+      },
+      "expect": {
+        "result": "check_the_record",
+        "may_have_changed": true,
+        "safe_to_retry": false,
+        "technical_code": "overlay_phase=halted"
+      }
+    },
+    {
+      "name": "overlay mid-run reads as Execute running",
+      "rule": "6",
+      "input": {
+        "overlay_phase": "executing"
+      },
+      "expect_progress": "running"
+    },
+    {
+      "name": "overlay paused reads as waiting for a person",
+      "rule": "6",
+      "input": {
+        "overlay_phase": "paused"
+      },
+      "expect_progress": "decision_required"
+    },
+    {
+      "name": "overlay idle is not a run",
+      "rule": "1",
+      "input": {
+        "overlay_phase": "idle"
+      },
+      "expect": {
+        "result": "check_the_record",
+        "may_have_changed": true,
+        "safe_to_retry": false,
+        "technical_code": "fallback=missing"
+      }
+    },
+    {
+      "name": "the transaction outcome decides over the overlay",
+      "rule": "2",
+      "input": {
+        "transaction_outcome": "HALTED_BEFORE_EFFECT",
+        "execution_outcome": "HALTED",
+        "overlay_phase": "halted"
+      },
+      "expect": {
+        "result": "stopped_before_change",
+        "may_have_changed": false,
+        "safe_to_retry": true,
+        "technical_code": "transaction_outcome=HALTED_BEFORE_EFFECT"
+      }
+    },
+    {
       "name": "sealed needs an Execute outcome",
       "rule": "11",
       "input": {

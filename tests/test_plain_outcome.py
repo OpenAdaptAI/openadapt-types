@@ -23,7 +23,9 @@ import pytest
 from pydantic import ValidationError
 
 from openadapt_types import (
+    CONTROL_OVERLAY_TERMINAL_PHASES,
     ClinicToolStatusV1,
+    ControlOverlayPhase,
     EffectStrengthV1,
     ExecuteEvidenceContractV1,
     ExecuteEvidenceReceiptV1,
@@ -72,6 +74,7 @@ def test_sources_match_the_table_in_precedence_order() -> None:
         (ExecuteTerminalOutcomeV1, "execute_terminal_outcome"),
         (ExecuteLifecycleStateV1, "execute_state"),
         (ClinicToolStatusV1, "clinic_tool_status"),
+        (ControlOverlayPhase, "overlay_phase"),
     ],
 )
 def test_every_value_of_this_packages_enums_is_mapped(enum_cls: type, source: str) -> None:
@@ -88,6 +91,9 @@ def test_every_value_of_this_packages_enums_is_mapped(enum_cls: type, source: st
         "openadapt_types.clinic_job:ClinicToolStatusV1=clinic_tool_status",
         "openadapt_types.execute:ExecuteStatusV1.terminal_outcome=execute_terminal_outcome",
         "openadapt_types.clinic_job:ClinicToolResultV1.status=clinic_tool_status",
+        "openadapt_types.control_overlay:ControlOverlayPhase=overlay_phase",
+        "openadapt_types.control_overlay:ControlOverlayFrameV1.phase=overlay_phase",
+        "openadapt_types.control_overlay_tracking:ControlOverlayFrameV2.phase=overlay_phase",
     ],
 )
 def test_the_coverage_lint_passes_on_this_packages_enums(spec: str) -> None:
@@ -282,9 +288,53 @@ def test_a_coarse_halt_never_reads_as_stopped_before_saving() -> None:
             plain_outcome(agent_status="halt"),
             plain_outcome(connector_status="halt"),
             plain_outcome(program_terminal_state="halt"),
+            plain_outcome(overlay_phase=ControlOverlayPhase.HALTED),
         ):
             assert result.result is PlainResultV1.CHECK_THE_RECORD
             assert "nothing was written" not in result.next_action.lower()
+
+
+def test_coarse_and_overlay_combinations_keep_the_safety_rule() -> None:
+    for coarse, overlay, agent in itertools.product(
+        _value_choices("execution_outcome"),
+        _value_choices("overlay_phase"),
+        [None, "refused", "timeout", "halt"],
+    ):
+        for dispatched, uncertain in FLAGS:
+            inputs = {
+                "execution_outcome": coarse,
+                "overlay_phase": overlay,
+                "agent_status": agent,
+                "dispatched": dispatched,
+                "delivery_uncertain": uncertain,
+            }
+            _check_invariants(inputs, _resolve(inputs))
+
+
+@pytest.mark.parametrize("phase", sorted(CONTROL_OVERLAY_TERMINAL_PHASES, key=lambda p: p.value))
+def test_an_overlay_end_phase_reads_like_the_outcome_it_mirrors(phase: ControlOverlayPhase) -> None:
+    # Flow emits each end phase from exactly one execution_outcome
+    # (runtime/control_overlay.py), so the two must read the same.
+    from_overlay = plain_outcome(overlay_phase=phase)
+    from_outcome = plain_outcome(execution_outcome=phase.value.upper())
+    fields = ("result", "label", "may_have_changed", "safe_to_retry", "next_action")
+    assert {f: getattr(from_overlay, f) for f in fields} == {f: getattr(from_outcome, f) for f in fields}
+    assert from_overlay.technical_code == f"overlay_phase={phase.value}"
+
+
+def test_an_overlay_mid_run_has_no_result_yet() -> None:
+    labels: dict[str, str] = {}
+    for phase in ControlOverlayPhase:
+        if phase in CONTROL_OVERLAY_TERMINAL_PHASES or phase.value in TABLE["not_an_outcome"]["overlay_phase"]:
+            continue
+        with pytest.raises(PlainOutcomeInProgress) as caught:
+            plain_outcome(overlay_phase=phase)
+        progress = caught.value.progress
+        assert progress.technical_code == f"overlay_phase={phase.value}"
+        assert progress.safe_to_retry is False
+        labels[phase.value] = progress.label
+    assert labels["executing"] == "Running"
+    assert labels["paused"] == "Waiting for a person"
 
 
 def test_only_rows_that_prove_no_effect_invite_a_retry() -> None:

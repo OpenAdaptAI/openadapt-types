@@ -10,7 +10,7 @@ with the package.
 |---|---|
 | `openadapt_types/vocabulary/vocabulary.json` | The plain term for each concept, its one-line meaning, and the technical terms that may appear only one level deeper |
 | `openadapt_types/vocabulary/outcomes.json` | How every run outcome OpenAdapt emits maps to one plain result, and where each outcome value comes from |
-| `openadapt_types/vocabulary/outcome-vectors.json` | 46 hand-written cases that any implementation of `outcomes.json` must pass |
+| `openadapt_types/vocabulary/outcome-vectors.json` | 51 hand-written cases that any implementation of `outcomes.json` must pass |
 | `openadapt_types/vocabulary/lint.py` | The checker. It uses only the Python standard library |
 | `openadapt_types/schemas/plain-outcome-v1.json` | JSON Schema for one plain result |
 | `openadapt_types/schemas/plain-progress-v1.json` | JSON Schema for a run that hasn't ended yet |
@@ -70,13 +70,28 @@ one of them.
 |---|---|---|---|---|
 | `done` | Done and checked | yes | no | `VERIFIED`, `verified` |
 | `stopped_before_change` | Stopped before saving | no | yes | `HALTED_BEFORE_EFFECT`, `halted_before_effect`, `CANCELED` |
-| `check_the_record` | Check the record | yes | no | `RECONCILIATION_REQUIRED`, `reconciliation_required`, `waiting_for_reconciliation`, `ROLLED_BACK`, `rolled_back_verified`, a coarse `HALTED` alone, a timeout after the run started, and anything unknown |
+| `check_the_record` | Check the record | yes | no | `RECONCILIATION_REQUIRED`, `reconciliation_required`, `waiting_for_reconciliation`, `ROLLED_BACK`, `rolled_back_verified`, a coarse `HALTED` or overlay `halted` alone, a timeout after the run started, and anything unknown |
 | `finished_not_checked` | Finished, not checked | yes | no | `COMPLETED_UNVERIFIED`, and a coarse success that doesn't show a record check |
 | `did_not_finish` | Didn't finish | depends | depends | `FAILED_PLATFORM` and `failed_platform` (nothing written), or a coarse `FAILED` or error (unknown) |
 | `refused` | Blocked before saving | no | yes | `REJECTED_POLICY`, `rejected_policy`, an Agent refusal before the run started |
 
 "Safe to retry" means a new attempt can't duplicate or collide with a write
 from this attempt. It doesn't promise that the new attempt will succeed.
+
+### Which value decides
+
+Outcome values come in three tiers. The first tier that has a value decides,
+and a lower tier never overrides it.
+
+| Tier | Sources | Where they come from |
+|---|---|---|
+| 1 | `transaction_outcome`, `execute_terminal_outcome`, `execute_state` | Flow's `report.json` and hosted callbacks; an Execute status, receipt, or webhook |
+| 2 | `execution_outcome` | Flow's coarse outcome |
+| 3 | `agent_status`, `connector_status`, `clinic_tool_status`, `program_terminal_state`, `overlay_phase` | The Agent, a Flow connector, a clinic tool result, where the program graph ended, and the on-screen overlay |
+
+Tiers 2 and 3 are coarse. A halt, failure, or timeout from them never says <!-- vocab-allow: no-change-claim -- states the rule, not a run result -->
+that nothing was written, unless you pass `dispatched=False` because the
+request never reached the app.
 
 ### The safety rule
 
@@ -147,6 +162,12 @@ A run that hasn't ended has no result. `plain_outcome()` raises
 `PlainProgressV1` with a label such as "Waiting for a person".
 `plain_outcome_for_execute_status()` returns the progress object instead of
 raising.
+
+A control overlay frame carries only a phase. Pass it as `overlay_phase`. An
+end phase such as `halted` reads the same as the coarse outcome it mirrors. A
+phase such as `executing` or `paused` raises `PlainOutcomeInProgress` with the
+"Running" or "Waiting for a person" label. `idle` and `recording` aren't runs,
+so on their own they read as "No outcome came back".
 
 `PlainOutcomeV1` checks itself. It refuses a label that doesn't match the
 result, a "nothing changed" result with `may_have_changed=True`, a next step
