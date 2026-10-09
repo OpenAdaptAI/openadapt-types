@@ -235,9 +235,11 @@ Two escape hatches, both of which need a reason:
 
 ## Keep every outcome covered
 
-A test in this repository fails when an enum here gains a value without a
-row. Flow and the Agent define the other outcome values, so their CI should
-run the coverage check too:
+Tests in this repository fail when an enum here gains a value without a row.
+They also fail when a new enum here holds run outcome values, such as
+`verified` or `halted`, and `outcomes.json` neither maps it nor sets it aside
+under `not_run_outcomes` with a reason. Flow and the Agent define the other
+outcome values, so their CI should run the coverage check too:
 
 ```bash
 # openadapt-flow
@@ -268,6 +270,10 @@ On 2026-10-09:
 - The Flow coverage command above, plus `HostedTerminalEventV1.outcome` and
   `terminal_verification_v2:ProductionExecutionOutcome.outcome`, ran against
   `openadapt-flow` origin/main `6e4e4ed0` with 0 errors.
+- The overlay rows match Flow's `runtime/control_overlay.py` at the same
+  commit: `emit_terminal` sets each end phase from exactly one
+  `execution_outcome`, and the replayer emits only `observing`, `executing`,
+  and `verifying` mid-run.
 - `openadapt-vocab-lint claims` on `openadapt-agent` origin/main `88b1dbd`
   (README, `llms.txt`, the skill, and the runner, copy, and MCP modules)
   reported 10 claims that a halt alone can't support, including "Tell the <!-- vocab-allow: no-change-claim -- quotes the wording the check found -->

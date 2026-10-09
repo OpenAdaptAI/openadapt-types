@@ -12,16 +12,20 @@ Three kinds of test:
 
 from __future__ import annotations
 
+import importlib
 import itertools
 import json
+import pkgutil
 import re
 from collections import defaultdict
+from enum import Enum
 from importlib.resources import files
 from typing import Any
 
 import pytest
 from pydantic import ValidationError
 
+import openadapt_types
 from openadapt_types import (
     CONTROL_OVERLAY_TERMINAL_PHASES,
     ClinicToolStatusV1,
@@ -98,6 +102,64 @@ def test_every_value_of_this_packages_enums_is_mapped(enum_cls: type, source: st
 )
 def test_the_coverage_lint_passes_on_this_packages_enums(spec: str) -> None:
     assert check_coverage(TABLE, enums=[spec]) == []
+
+
+_TYPES_SYMBOL = re.compile(r"^(openadapt_types/[\w/]+\.py) (\w+)\b")
+# Values that name how a run ended. An enum in this package that carries one
+# either feeds plain_outcome() or is listed as something else on purpose.
+_RUN_OUTCOME_MARKERS = {
+    value.lower()
+    for source in ("transaction_outcome", "execute_terminal_outcome", "execution_outcome")
+    for value in known_values(TABLE, source)
+}
+
+
+def _this_packages_enums() -> list[type[Enum]]:
+    found: list[type[Enum]] = []
+    for info in pkgutil.walk_packages(openadapt_types.__path__, "openadapt_types."):
+        module = importlib.import_module(info.name)
+        for obj in vars(module).values():
+            if isinstance(obj, type) and issubclass(obj, Enum) and obj.__module__ == module.__name__:
+                found.append(obj)
+    return found
+
+
+def _symbol_names(symbol: str, enum_cls: type[Enum]) -> bool:
+    path = enum_cls.__module__.replace(".", "/") + ".py"
+    return symbol.startswith(path + " ") and re.search(rf"\b{enum_cls.__name__}\b", symbol) is not None
+
+
+def test_every_outcome_enum_in_this_package_is_mapped_or_set_aside() -> None:
+    # A new enum here that names run outcomes fails until outcomes.json
+    # either maps it (an emitter) or says why it isn't a run result.
+    symbols = [e["symbol"] for e in TABLE["emitters"] if e["repository"] == "OpenAdaptAI/openadapt-types"]
+    symbols += [entry["symbol"] for entry in TABLE["not_run_outcomes"]]
+    outcome_enums = [
+        enum_cls
+        for enum_cls in _this_packages_enums()
+        if {str(member.value).lower() for member in enum_cls} & _RUN_OUTCOME_MARKERS
+    ]
+    assert ControlOverlayPhase in outcome_enums and ExecuteTerminalOutcomeV1 in outcome_enums
+    unaccounted = [
+        f"{enum_cls.__module__}.{enum_cls.__name__}"
+        for enum_cls in outcome_enums
+        if not any(_symbol_names(symbol, enum_cls) for symbol in symbols)
+    ]
+    assert unaccounted == []
+
+
+def test_this_packages_emitters_list_exactly_their_enum_values() -> None:
+    checked = 0
+    for emitter in TABLE["emitters"]:
+        if emitter["repository"] != "OpenAdaptAI/openadapt-types":
+            continue
+        match = _TYPES_SYMBOL.match(emitter["symbol"])
+        assert match, emitter["symbol"]
+        module = importlib.import_module(match.group(1)[:-3].replace("/", "."))
+        enum_cls = getattr(module, match.group(2))
+        assert {member.value for member in enum_cls} == set(emitter["values"]), emitter["symbol"]
+        checked += 1
+    assert checked == 4
 
 
 def test_every_source_lists_where_its_values_come_from() -> None:

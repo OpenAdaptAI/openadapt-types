@@ -123,6 +123,30 @@
     {
       "symbol": "openadapt_flow/qualification.py case status, runtime/durable/checkpoint.py status, and authoring.py status",
       "reason": "Readiness-test, checkpoint, and authoring states, not run results."
+    },
+    {
+      "symbol": "openadapt_types/reward.py RewardOutcomeV1 and RewardUncertaintyStateV1",
+      "reason": "The reward oracle's verdict on a training episode. It scores a policy and is never shown to a person as a run result."
+    },
+    {
+      "symbol": "openadapt_types/human_decision.py HumanDecisionReceiptState",
+      "reason": "What happened to one person's answer on a paused run. The run's own outcome arrives in its report."
+    },
+    {
+      "symbol": "openadapt_types/business_decision.py BusinessDecisionAnswerReceiptState",
+      "reason": "What happened to one business decision a person answered. The run's own outcome arrives in its report."
+    },
+    {
+      "symbol": "openadapt_types/authoring.py AuthoringCommandStatusV1 and AuthoringErrorCodeV1",
+      "reason": "The status of one command while someone builds a workflow, not a run result."
+    },
+    {
+      "symbol": "openadapt_types/authentication.py AuthenticationOutcome and AuthenticationMfaOutcome",
+      "reason": "Whether a sign-in step was confirmed, not whether a run saved anything."
+    },
+    {
+      "symbol": "openadapt_types/process_capability.py ArtifactVerificationState",
+      "reason": "Whether one artifact's content was checked, not whether a run saved anything."
     }
   ],
   "results": {
