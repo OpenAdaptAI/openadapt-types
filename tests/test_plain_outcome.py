@@ -469,6 +469,65 @@ def test_a_hand_built_result_that_keeps_the_rule_is_accepted() -> None:
         ({"proof": "sealed"}, "signed receipt"),
         ({"technical_code": "status=halted"}, "technical_code"),
         ({"exact": {"agent_status": "the record did not change"}}, "agent_status"),
+        (
+            {"technical_code": "execution_outcome=HALTED", "exact": {"execution_outcome": "HALTED"}},
+            "execution_outcome=HALTED reads as check_the_record",
+        ),
+        (
+            {
+                "result": "refused",
+                "label": "Blocked before saving",
+                "technical_code": "agent_status=halt",
+                "exact": {"agent_status": "halt"},
+            },
+            "agent_status=halt reads as check_the_record",
+        ),
+        (
+            {
+                "result": "done",
+                "label": "Done and checked",
+                "may_have_changed": True,
+                "safe_to_retry": False,
+                "next_action": "Nothing else to do.",
+                "technical_code": "connector_status=success",
+                "exact": {"connector_status": "success"},
+            },
+            "connector_status=success reads as finished_not_checked",
+        ),
+        (
+            {
+                "result": "did_not_finish",
+                "label": "Didn't finish",
+                "technical_code": "agent_status=timeout",
+                "exact": {"agent_status": "timeout"},
+            },
+            "agent_status=timeout reads as check_the_record",
+        ),
+        (
+            {
+                "exact": {
+                    "transaction_outcome": "HALTED_BEFORE_EFFECT",
+                    "execution_outcome": "VERIFIED",
+                },
+            },
+            "isn't what the exact inputs decide",
+        ),
+        (
+            {"exact": {"transaction_outcome": "HALTED_BEFORE_EFFECT", "delivery_uncertain": True}},
+            "isn't what the exact inputs decide",
+        ),
+        ({"exact": {}}, "isn't what the exact inputs decide"),
+        (
+            {
+                "result": "check_the_record",
+                "label": "Check the record",
+                "may_have_changed": True,
+                "safe_to_retry": False,
+                "next_action": "Check the record before anyone runs this again.",
+                "technical_code": "fallback=unknown",
+            },
+            "names no fallback",
+        ),
     ],
 )
 def test_a_hand_built_result_that_breaks_the_rule_is_refused(
@@ -476,6 +535,42 @@ def test_a_hand_built_result_that_breaks_the_rule_is_refused(
 ) -> None:
     with pytest.raises(ValidationError, match=re.escape(message)):
         PlainOutcomeV1.model_validate(_fields(**updates))
+
+
+@pytest.mark.parametrize(
+    "updates",
+    [
+        {
+            "result": "did_not_finish",
+            "label": "Didn't finish",
+            "next_action": "The run never reached the app, so nothing was written. You can send it again.",
+            "technical_code": "agent_status=timeout",
+            "exact": {"agent_status": "timeout", "dispatched": False},
+        },
+        {
+            "result": "check_the_record",
+            "label": "Check the record",
+            "may_have_changed": True,
+            "safe_to_retry": False,
+            "next_action": "Check the record before anyone runs this again.",
+            "technical_code": "fallback=conflict",
+        },
+    ],
+)
+def test_a_hand_built_result_the_table_allows_is_accepted(updates: dict[str, Any]) -> None:
+    PlainOutcomeV1.model_validate(_fields(**updates))
+
+
+def test_every_vector_result_survives_a_json_round_trip() -> None:
+    checked = 0
+    for case in VECTORS:
+        if "expect" not in case:
+            continue
+        resolved = _resolve(dict(case["input"]))
+        assert isinstance(resolved, PlainOutcomeV1), case["name"]
+        assert PlainOutcomeV1.model_validate_json(resolved.model_dump_json()) == resolved
+        checked += 1
+    assert checked > 30
 
 
 def test_flags_must_be_real_booleans() -> None:

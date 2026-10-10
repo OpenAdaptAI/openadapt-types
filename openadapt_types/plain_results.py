@@ -35,7 +35,7 @@ from __future__ import annotations
 import re
 from enum import Enum
 from functools import lru_cache
-from typing import Any, Literal, Mapping
+from typing import Any, Literal, Mapping, NamedTuple
 
 from pydantic import (
     BaseModel,
@@ -184,6 +184,37 @@ class PlainOutcomeV1(_StrictContract):
                     )
         if self.proof is PlainProofV1.SEALED and self.exact.execute_terminal_outcome is None:
             raise ValueError("a signed receipt always carries an execute_terminal_outcome")
+        # The result must be the one the table gives for these exact inputs,
+        # so a hand-built result can't read a bare HALTED as "nothing changed"
+        # or call an unchecked run done. A fallback only adds caution, so it
+        # stands for any inputs.
+        source, _, value = self.technical_code.partition("=")
+        if source == "fallback":
+            row = table["fallbacks"].get(value)
+            if row is None:
+                raise ValueError(f"{self.technical_code} names no fallback")
+        else:
+            decision = _decide(
+                table,
+                {name.value: getattr(self.exact, name.value) for name in OutcomeSourceV1},
+                dispatched=self.exact.dispatched,
+                delivery_uncertain=self.exact.delivery_uncertain,
+            )
+            if decision.row is None or (decision.source, decision.value) != (source, value):
+                raise ValueError(
+                    f"technical_code {self.technical_code} isn't what the exact inputs decide"
+                )
+            row = decision.row
+        if (row["result"], row["may_have_changed"], row["safe_to_retry"]) != (
+            result,
+            self.may_have_changed,
+            self.safe_to_retry,
+        ):
+            raise ValueError(
+                f"{self.technical_code} reads as {row['result']} with "
+                f"may_have_changed={row['may_have_changed']} and "
+                f"safe_to_retry={row['safe_to_retry']}"
+            )
         return self
 
 
@@ -254,6 +285,103 @@ def _flag(name: str, value: object) -> bool | None:
     return value
 
 
+class _Decision(NamedTuple):
+    """What the table decides for one set of inputs.
+
+    ``row`` is the selected row, or ``None`` while the run is in progress.
+    ``source`` and ``value`` name the deciding input, or ``fallback`` and the
+    fallback's name.
+    """
+
+    row: Mapping[str, Any] | None
+    source: str
+    value: str
+
+
+def _decide(
+    table: Mapping[str, Any],
+    raw: Mapping[str, str | _Unrecognized | None],
+    *,
+    dispatched: bool | None,
+    delivery_uncertain: bool | None,
+) -> _Decision:
+    """Apply ``merge_rules`` from outcomes.json to normalized inputs."""
+
+    def fallback(name: str) -> _Decision:
+        return _Decision(table["fallbacks"][name], "fallback", name)
+
+    def settled(decision: _Decision) -> _Decision:
+        # Rule 9.
+        if (
+            delivery_uncertain is True
+            and decision.row is not None
+            and decision.row["result"] != PlainResultV1.CHECK_THE_RECORD.value
+        ):
+            return fallback("delivery_uncertain")
+        return decision
+
+    # Rule 1: values that aren't outcomes add nothing.
+    ignored = table.get("not_an_outcome", {})
+    present = {
+        source: value
+        for source, value in raw.items()
+        if value is not None and value not in ignored.get(source, [])
+    }
+    # Rule 10.
+    if not present:
+        return settled(fallback("missing"))
+    # Rule 2: the first tier that still has an input decides.
+    tier = next(tier for tier in table["tiers"] if any(source in present for source in tier))
+
+    rows: list[tuple[str, str, Mapping[str, Any]]] = []
+    progress: list[tuple[str, str]] = []
+    for source in tier:
+        value = present.get(source)
+        if value is None:
+            continue
+        # Rule 3.
+        if not isinstance(value, str):
+            return settled(fallback("unrecognized"))
+        if value in table.get("in_progress", {}).get(source, {}):
+            progress.append((source, value))
+            continue
+        row = table["sources"][source]["values"].get(value)
+        if row is None:
+            return settled(fallback("unrecognized"))
+        # Rule 5.
+        if dispatched is False and "if_not_dispatched" in row:
+            row = row["if_not_dispatched"]
+        rows.append((source, value, row))
+
+    # Rule 4: the coarse outcome must be one the transaction outcome allows.
+    transaction = table["sources"]["transaction_outcome"]["values"].get(
+        present.get("transaction_outcome")  # type: ignore[arg-type]
+    )
+    coarse = present.get("execution_outcome")
+    if transaction is not None and coarse is not None:
+        if coarse not in transaction["execution_outcomes"]:
+            return settled(fallback("conflict"))
+
+    # Rule 6.
+    if progress:
+        if rows or len(progress) > 1:
+            return settled(fallback("conflict"))
+        source, value = progress[0]
+        return _Decision(None, source, value)
+
+    # Rules 7 and 8.
+    if len({row["result"] for _, _, row in rows}) == 1:
+        source, value, row = next(
+            (hit for hit in rows if hit[2]["may_have_changed"]),
+            next((hit for hit in rows if not hit[2]["safe_to_retry"]), rows[0]),
+        )
+    elif all(not row["may_have_changed"] for _, _, row in rows):
+        source, value, row = rows[0]
+    else:
+        return settled(fallback("conflict"))
+    return settled(_Decision(row, source, value))
+
+
 def _resolve(
     values: Mapping[str, object],
     *,
@@ -282,91 +410,27 @@ def _resolve(
             "proof=sealed needs an execute_terminal_outcome, because a signed receipt carries one"
         )
 
-    def outcome(row: Mapping[str, Any], technical_code: str) -> PlainOutcomeV1:
-        if delivery_uncertain is True and row["result"] != PlainResultV1.CHECK_THE_RECORD.value:
-            row, technical_code = table["fallbacks"]["delivery_uncertain"], "fallback=delivery_uncertain"
-        return PlainOutcomeV1(
-            result=row["result"],
-            label=table["results"][row["result"]]["label"],
-            may_have_changed=row["may_have_changed"],
-            safe_to_retry=row["safe_to_retry"],
-            proof=proof_level,
-            next_action=row["next_action"],
-            technical_code=technical_code,
-            exact=exact,
-        )
-
-    def fallback(name: str) -> PlainOutcomeV1:
-        return outcome(table["fallbacks"][name], f"fallback={name}")
-
-    # Rule 1: values that aren't outcomes add nothing.
-    ignored = table.get("not_an_outcome", {})
-    present = {
-        source: value
-        for source, value in raw.items()
-        if value is not None and value not in ignored.get(source, [])
-    }
-    # Rule 10.
-    if not present:
-        return fallback("missing")
-    # Rule 2: the first tier that still has an input decides.
-    tier = next(tier for tier in table["tiers"] if any(source in present for source in tier))
-
-    rows: list[tuple[str, str, Mapping[str, Any]]] = []
-    progress: list[tuple[str, str]] = []
-    for source in tier:
-        value = present.get(source)
-        if value is None:
-            continue
-        # Rule 3.
-        if not isinstance(value, str):
-            return fallback("unrecognized")
-        if value in table.get("in_progress", {}).get(source, {}):
-            progress.append((source, value))
-            continue
-        row = table["sources"][source]["values"].get(value)
-        if row is None:
-            return fallback("unrecognized")
-        # Rule 5.
-        if dispatched is False and "if_not_dispatched" in row:
-            row = row["if_not_dispatched"]
-        rows.append((source, value, row))
-
-    # Rule 4: the coarse outcome must be one the transaction outcome allows.
-    transaction = table["sources"]["transaction_outcome"]["values"].get(
-        present.get("transaction_outcome")  # type: ignore[arg-type]
-    )
-    coarse = present.get("execution_outcome")
-    if transaction is not None and coarse is not None:
-        if coarse not in transaction["execution_outcomes"]:
-            return fallback("conflict")
-
-    # Rule 6.
-    if progress:
-        if rows or len(progress) > 1:
-            return fallback("conflict")
-        source, value = progress[0]
-        state = _progress_state(table, source, value)
+    decision = _decide(table, raw, dispatched=dispatched, delivery_uncertain=delivery_uncertain)
+    if decision.row is None:
+        state = _progress_state(table, decision.source, decision.value)
         spec = table["in_progress"]["execute_state"][state]
         return PlainProgressV1(
             state=state,
             label=spec["label"],
             next_action=spec["next_action"],
-            technical_code=f"{source}={value}",
+            technical_code=f"{decision.source}={decision.value}",
         )
-
-    # Rules 7 and 8.
-    if len({row["result"] for _, _, row in rows}) == 1:
-        source, value, row = next(
-            (hit for hit in rows if hit[2]["may_have_changed"]),
-            next((hit for hit in rows if not hit[2]["safe_to_retry"]), rows[0]),
-        )
-    elif all(not row["may_have_changed"] for _, _, row in rows):
-        source, value, row = rows[0]
-    else:
-        return fallback("conflict")
-    # Rule 9 is applied inside outcome().
-    return outcome(row, f"{source}={value}")
+    row = decision.row
+    return PlainOutcomeV1(
+        result=row["result"],
+        label=table["results"][row["result"]]["label"],
+        may_have_changed=row["may_have_changed"],
+        safe_to_retry=row["safe_to_retry"],
+        proof=proof_level,
+        next_action=row["next_action"],
+        technical_code=f"{decision.source}={decision.value}",
+        exact=exact,
+    )
 
 
 def plain_outcome(

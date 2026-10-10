@@ -148,7 +148,7 @@ result.may_have_changed  # True
 result.safe_to_retry     # False
 result.next_action       # "A save may have gone through. Check the record before anyone runs this again."
 result.technical_code    # "transaction_outcome=RECONCILIATION_REQUIRED"
-result.exact             # every input value, for a Technical details view
+result.exact             # the status codes it came from, for a Technical details view
 
 report = json.loads(Path("run/report.json").read_text())
 plain_outcome_for_run_report(report)   # proof is "local"
@@ -176,10 +176,14 @@ phase such as `executing` or `paused` raises `PlainOutcomeInProgress` with the
 "Running" or "Waiting for a person" label. `idle` and `recording` aren't runs.
 On their own they count as no outcome at all, which reads "Check the record".
 
-`PlainOutcomeV1` checks itself. It refuses a label that doesn't match the
-result, a "nothing changed" result with `may_have_changed=True`, a next step
-that claims nothing was written when something may have been, and `sealed`
-proof without an Execute outcome.
+`PlainOutcomeV1` checks itself, so a hand-built or deserialized result gets
+the same checks. It refuses a label that doesn't match the result, a "nothing
+changed" result with `may_have_changed=True`, a next step that claims nothing
+was written when something may have been, and `sealed` proof without an
+Execute outcome. It also refuses a result, `may_have_changed`, or
+`safe_to_retry` that differs from what the table gives for the values in
+`exact`. A `fallback` code only adds caution, so it's accepted with any
+values.
 
 ## Use it from another language
 

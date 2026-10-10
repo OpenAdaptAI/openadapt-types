@@ -222,7 +222,9 @@ unrecognized and left out.
 The `PlainOutcomeV1` model refuses a result that breaks the safety rule. Only
 a result that proves no effect may set `may_have_changed` to false,
 `safe_to_retry` needs `may_have_changed` false, and `sealed` proof needs an
-Execute terminal outcome. The JSON Schema names the rule in
+Execute terminal outcome. The result and both flags must be the ones the
+outcome table gives for the values in `exact`, unless `technical_code` names
+a fallback, which only adds caution. The JSON Schema names the rule in
 `x-openadapt-safety-rule` but doesn't enforce it, so code in another language
 checks itself against `outcome-vectors.json`. `plain-progress-v1.json` covers
 a run that hasn't ended; it always has `safe_to_retry` false.
