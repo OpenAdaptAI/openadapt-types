@@ -26,8 +26,8 @@ Every user-facing file sits at one of three levels. A technical term has a
 | `detail` | Someone who opened a section on purpose to see the exact term | A Technical details disclosure, an IT or security section, a run detail view, partner integration pages, CLI `--verbose` output |
 | `engineering` | Engineers and auditors | Reference docs, evidence views, `report.json`, API fields, code |
 
-The plain term works at every level. A technical term never leaves the
-engineering level, so engineers and auditors keep the exact name.
+The plain term works at every level. Every technical term stays allowed at
+the engineering level, so engineers and auditors keep the exact name.
 
 ## The vocabulary
 
@@ -96,9 +96,9 @@ The one exception only adds caution: when `transaction_outcome` and
 | 2 | `execution_outcome` | Flow's coarse outcome |
 | 3 | `agent_status`, `connector_status`, `clinic_tool_status`, `program_terminal_state`, `overlay_phase` | The Agent, a Flow connector, a clinic tool result, where the program graph ended, and the on-screen overlay |
 
-Tiers 2 and 3 are coarse. A halt, failure, or timeout from them never says <!-- vocab-allow: no-change-claim -- states the rule, not a run result -->
-that nothing was written, unless you pass `dispatched=False` because the
-request never reached the app.
+Tiers 2 and 3 are coarse. A halt from them never says that nothing was written. <!-- vocab-allow: no-change-claim -- states the rule, not a run result -->
+An Agent timeout or error, or a connector failure, says so only when you pass
+`dispatched=False` because the request never reached the app.
 
 ### The safety rule
 
@@ -173,8 +173,8 @@ raising.
 A control overlay frame carries only a phase. Pass it as `overlay_phase`. An
 end phase such as `halted` reads the same as the coarse outcome it mirrors. A
 phase such as `executing` or `paused` raises `PlainOutcomeInProgress` with the
-"Running" or "Waiting for a person" label. `idle` and `recording` aren't runs,
-so on their own they read as "No outcome came back".
+"Running" or "Waiting for a person" label. `idle` and `recording` aren't runs.
+On their own they count as no outcome at all, which reads "Check the record".
 
 `PlainOutcomeV1` checks itself. It refuses a label that doesn't match the
 result, a "nothing changed" result with `may_have_changed=True`, a next step
