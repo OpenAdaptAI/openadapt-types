@@ -147,6 +147,10 @@
     {
       "symbol": "openadapt_types/process_capability.py ArtifactVerificationState",
       "reason": "Whether one artifact's content was checked, not whether a run saved anything."
+    },
+    {
+      "symbol": "openadapt_types/process_capability.py ProcessEvidenceReceiptV1.outcome (openadapt_flow/runtime/process_v1.py sets it)",
+      "reason": "The outcome of the step that ended a multi-step process. An earlier step may already have saved, so halted_before_effect, rejected_policy, or failed_platform here doesn't prove the process wrote nothing. Never pass it as execute_terminal_outcome."
     }
   ],
   "results": {

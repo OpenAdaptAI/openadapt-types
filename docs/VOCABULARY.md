@@ -159,6 +159,11 @@ Other helpers read an `ExecuteStatusV1`, an `ExecuteEvidenceReceiptV1`, and a
 terminal Execute webhook. The webhook helper reports `sealed` proof only after
 the HMAC signature checks.
 
+Don't pass the outcome on a process receipt (`ProcessEvidenceReceiptV1`) as
+`execute_terminal_outcome`. It's the outcome of the step that ended the
+process, and an earlier step may already have saved. `outcomes.json` lists it
+under `not_run_outcomes` for that reason.
+
 Set `dispatched=False` only when you know the request never reached the app,
 for example when the Agent timed out before Flow started. Pass Flow's hosted
 callback field `started` as `dispatched` and `uncertain_delivery` as
@@ -271,8 +276,8 @@ openadapt-vocab-lint coverage --values agent_status=success,halt,refused,timeout
 Add `--partial` for an emitter that sends only some of a source's values.
 
 `outcomes.json` lists each emitter it was checked against under `emitters`,
-with the commit it was read at, and lists the run-adjacent states it leaves
-out on purpose under `not_run_outcomes`.
+with the commit it was read at. It lists the states it leaves out on purpose,
+each with a reason, under `not_run_outcomes`.
 
 ## Checked against
 
