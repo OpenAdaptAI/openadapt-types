@@ -2,9 +2,10 @@
 
 These are the messages that OpenAdapt components exchange: runners, the
 Execute API, Cloud, Desktop, and agent connectors. Each one is a Pydantic
-model in `openadapt_types` and a JSON Schema file under
-`openadapt_types/schemas/`. A test checks that every file in that directory
-appears in this index.
+model in `openadapt_types` and a file under `openadapt_types/schemas/`. Most
+files are JSON Schema. `execute-v1-openapi.json` is an OpenAPI document, and
+two files hold test vectors for matching a runner to a plan's requirements.
+A test checks that every file in that directory appears in this index.
 
 | Schema files | Python models | What it holds | Details |
 |---|---|---|---|

@@ -184,3 +184,37 @@ def test_readme_names_only_schemas_that_ship() -> None:
     shipped = {path.name for path in SCHEMA_DIR.glob("*.json")}
     missing = sorted(named - shipped)
     assert not missing, f"README names schema files that do not ship: {missing}"
+
+
+def test_package_docstring_example_runs() -> None:
+    # help(openadapt_types) shows this example, so it has to run as written.
+    import textwrap
+
+    import openadapt_types
+
+    example = textwrap.dedent(openadapt_types.__doc__.split("Quick start::", 1)[1])
+    exec(compile(example, "openadapt_types/__init__.py", "exec"), {})
+
+
+# The README's Limits section describes current behavior. When a fix changes
+# that behavior, these tests fail so the README stops describing a limit that
+# is gone. Delete the README bullet and the test together.
+
+
+def test_readme_limit_screenshot_bytes_still_do_not_serialize() -> None:
+    from pydantic_core import PydanticSerializationError
+
+    from openadapt_types import ComputerState
+
+    assert "screenshot_png` holds raw bytes" in README.read_text(encoding="utf-8")
+    with pytest.raises(PydanticSerializationError):
+        ComputerState(screenshot_png=b"\x89PNG\r\n\x1a\n").model_dump_json()
+
+
+def test_readme_limit_dsl_node_id_target_still_dropped() -> None:
+    from openadapt_types import parse_action
+
+    assert 'CLICK(node_id="n1")` returns a click with no target' in README.read_text(
+        encoding="utf-8"
+    )
+    assert parse_action('CLICK(node_id="n1")').target is None

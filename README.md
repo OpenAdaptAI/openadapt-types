@@ -63,7 +63,7 @@ own, install [OpenAdapt](https://github.com/OpenAdaptAI/OpenAdapt)
 | `ActionResult` | Whether the action ran, an error category, and which elements changed |
 | `Episode`, `Step` | A whole trajectory of observations, actions, results, and rewards, saved to and loaded from JSON |
 | `FailureRecord` | A failure sorted into a category such as grounding, navigation, or execution, for dataset pipelines |
-| `PlainOutcomeV1` | One run's result in plain words, whether anything may have changed, and whether a retry is safe |
+| `PlainOutcomeV1` | An OpenAdapt run's result in plain words, whether anything may have changed, and whether a retry is safe |
 
 The same screen model covers web, Windows, macOS, and Linux. It keeps the
 screenshot and the element tree together, because each holds information the
@@ -100,14 +100,16 @@ print(parse_action("I'm not sure what to do").type.value)  # fail
 ```
 
 `parse_action()` reads the `NAME(arg=value)` form shown here and JSON,
-including JSON inside a code fence. A reply it can't read becomes a `fail`
-action with the reason in `reasoning`, and the parser logs a warning. A
-harness can't mistake an unreadable reply for a finished task.
+including JSON inside a code fence. When `x` and `y` are both between 0 and
+1, it reads them as fractions of the screen; otherwise it reads them as
+pixels. A reply it can't read becomes a `fail` action with the reason in
+`reasoning`, and the parser logs a warning. A harness can't mistake an
+unreadable reply for a finished task.
 
 ## Report how a run ended
 
-`plain_outcome()` turns the status values a run reports into one result a
-person can act on:
+`plain_outcome()` turns the status values from an OpenAdapt run into one
+result a person can act on:
 
 ```python
 from openadapt_types import plain_outcome
@@ -122,8 +124,9 @@ print(result.safe_to_retry)  # False
 ```
 
 An unknown or contradictory status reads "Check the record", never "nothing
-was written". The same table ships as JSON for other languages, and the
-`openadapt-vocab-lint` command checks user-facing text against it. See
+was written". The table that maps status values to results also ships as
+JSON for other languages, and the `openadapt-vocab-lint` command checks
+user-facing text against it. See
 [docs/VOCABULARY.md](https://github.com/OpenAdaptAI/openadapt-types/blob/main/docs/VOCABULARY.md).
 
 ## JSON Schema for other languages
@@ -135,25 +138,28 @@ from openadapt_types import ComputerState
 print(json.dumps(ComputerState.model_json_schema(), indent=2))
 ```
 
-The messages that OpenAdapt components exchange also ship as JSON Schema
-files under `openadapt_types/schemas/`: forty files, including
-`execute-v1-openapi.json`, the OpenAPI document for the OpenAdapt Execute API.
+The messages that OpenAdapt components exchange ship under
+`openadapt_types/schemas/`: forty files, including `execute-v1-openapi.json`,
+the OpenAPI document for OpenAdapt Execute, the API that starts runs and
+reports their results. Two files hold test vectors, and the rest are JSON
+Schema files.
 [docs/CONTRACTS.md](https://github.com/OpenAdaptAI/openadapt-types/blob/main/docs/CONTRACTS.md)
 lists each contract, its Python model, and what it may carry.
 
 ## Convert from older formats
 
 ```python
-from openadapt_types._compat import from_benchmark_action
+from openadapt_types import from_benchmark_action
 
 action = from_benchmark_action({"type": "click", "x": 0.5, "y": 0.3})
-print(action.type.value)                                 # click
+print(action.type.value, action.target.is_normalized)          # click True
 print(from_benchmark_action({"type": "teleport"}).type.value)  # fail
 ```
 
-`openadapt_types._compat` converts observations and actions from
-openadapt-evals (`from_benchmark_*`), openadapt-ml (`from_ml_*`), and omnimcp
-(`from_omnimcp_*`). Each converter takes a plain dict, such as
+`from_benchmark_action()` reads an openadapt-evals action dict. The other
+converters are in `openadapt_types._compat`: `from_benchmark_observation()`
+for openadapt-evals observations, `from_ml_*` for openadapt-ml, and
+`from_omnimcp_*` for omnimcp. Each converter takes a plain dict, such as
 `obs.__dict__`. An action type it doesn't recognize becomes a `fail` action,
 never `done`.
 
@@ -161,10 +167,18 @@ never `done`.
 
 - The API can still change between minor versions before 1.0. Pin the minor
   version you test against.
+- `ComputerState.screenshot_png` holds raw bytes, which don't convert to
+  JSON: `model_dump_json()` and `Episode.to_json()` raise an error. To save a
+  state or an episode as JSON, put the screenshot in `screenshot_path` or
+  `screenshot_base64` instead.
+- In the `NAME(arg=value)` form, `parse_action()` reads only `x` and `y` as a
+  target. `CLICK(node_id="n1")` returns a click with no target. Use the JSON
+  form for `node_id` and `description` targets.
 - Some rules compare one field with another, such as "a result that says
   nothing changed can't also say something may have changed". The Python
-  models enforce them. The JSON Schema files don't always, so code in another
-  language has to check them itself.
+  models enforce them. The JSON Schema, from the files or from
+  `model_json_schema()`, doesn't always, so code in another language has to
+  check them itself.
 
 ## License
 
