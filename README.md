@@ -1,5 +1,7 @@
 # openadapt-types
 
+> This repository has moved to the [OpenAdapt monorepo](https://github.com/OpenAdaptAI/OpenAdapt) (`packages/types`). It is archived and read-only; open issues and PRs there. The PyPI package name `openadapt-types` is unchanged.
+
 [![test](https://github.com/OpenAdaptAI/openadapt-types/actions/workflows/test.yml/badge.svg)](https://github.com/OpenAdaptAI/openadapt-types/actions/workflows/test.yml)
 [![PyPI](https://img.shields.io/pypi/v/openadapt-types)](https://pypi.org/project/openadapt-types/)
 [![Python](https://img.shields.io/pypi/pyversions/openadapt-types)](https://pypi.org/project/openadapt-types/)
